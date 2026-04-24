@@ -1,33 +1,34 @@
 import { useEffect, useRef } from 'react'
-import type { SatelliteDetail } from '../types'
+import type { TLEData } from '../api/satellites'
+import type { SatelliteListItem } from '../types'
 
-// Conditional import — Cesium may fail in SSR/test environments
 let CesiumModule: typeof import('cesium') | null = null
-
 async function loadCesium() {
   if (CesiumModule) return CesiumModule
-  try {
-    CesiumModule = await import('cesium')
-    return CesiumModule
-  } catch {
-    return null
-  }
-}
-
-interface CesiumGlobeProps {
-  satellites: SatelliteDetail[]
+  try { CesiumModule = await import('cesium'); return CesiumModule }
+  catch { return null }
 }
 
 const CESIUM_TOKEN = import.meta.env.VITE_CESIUM_TOKEN as string | undefined
 
-export function CesiumGlobe({ satellites }: CesiumGlobeProps) {
+// Orbit trail: compute positions every 60s for the next 90 minutes (one LEO orbit)
+const TRAIL_STEP_S = 60
+const TRAIL_MINUTES = 90
+
+interface Props {
+  satellites: SatelliteListItem[]
+  tles: TLEData[]
+}
+
+export function CesiumGlobe({ satellites, tles }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<import('cesium').Viewer | null>(null)
+  const entitiesRef = useRef<Map<string, import('cesium').Entity>>(new Map())
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // ── initial viewer setup ──────────────────────────────────────────────────
   useEffect(() => {
-    if (!CESIUM_TOKEN) return
-    if (!containerRef.current) return
-
+    if (!CESIUM_TOKEN || !containerRef.current) return
     let cancelled = false
 
     void (async () => {
@@ -35,7 +36,6 @@ export function CesiumGlobe({ satellites }: CesiumGlobeProps) {
       if (!Cesium || cancelled || !containerRef.current) return
 
       Cesium.Ion.defaultAccessToken = CESIUM_TOKEN
-
       const viewer = new Cesium.Viewer(containerRef.current, {
         terrainProvider: undefined,
         baseLayerPicker: false,
@@ -49,116 +49,138 @@ export function CesiumGlobe({ satellites }: CesiumGlobeProps) {
         infoBox: false,
         selectionIndicator: false,
       })
-
       viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#0a0e1a')
       viewer.scene.globe.enableLighting = true
-      viewerRef.current = viewer
-
-      // Add satellite entities from TLE
-      satellites.forEach((sat) => {
-        if (!sat.tle_line1 || !sat.tle_line2) return
-
-        try {
-          // Import satellite.js dynamically to avoid top-level issues
-          import('satellite.js').then(({ twoline2satrec, propagate, gstime }) => {
-            const satrec = twoline2satrec(sat.tle_line1!, sat.tle_line2!)
-
-            // Compute current position
-            const now = new Date()
-            const posVel = propagate(satrec, now)
-            if (!posVel.position || typeof posVel.position === 'boolean') return
-
-            const gmst = gstime(now)
-            // Convert ECI to ECEF degrees for Cesium
-            const pos = posVel.position as { x: number; y: number; z: number }
-            // ECI km → Cesium Cartesian3
-            const cartesian = new Cesium!.Cartesian3(
-              pos.x * 1000,
-              pos.y * 1000,
-              pos.z * 1000,
-            )
-            void gmst // used implicitly via sgp4 which returns ECI
-
-            viewer.entities.add({
-              name: sat.name,
-              position: cartesian,
-              point: {
-                pixelSize: 8,
-                color: Cesium!.Color.CYAN,
-                outlineColor: Cesium!.Color.WHITE,
-                outlineWidth: 1,
-              },
-              label: {
-                text: sat.name,
-                font: '11px JetBrains Mono, monospace',
-                fillColor: Cesium!.Color.WHITE,
-                outlineColor: Cesium!.Color.BLACK,
-                outlineWidth: 2,
-                style: Cesium!.LabelStyle.FILL_AND_OUTLINE,
-                pixelOffset: new Cesium!.Cartesian2(0, -18),
-              },
-            })
-          })
-        } catch {
-          console.warn(`[Cesium] Could not place satellite ${sat.name}`)
-        }
-      })
-
-      // Zoom to home
       viewer.camera.setView({
-        destination: Cesium.Cartesian3.fromDegrees(0, 20, 20_000_000),
+        destination: Cesium.Cartesian3.fromDegrees(35.0, 39.0, 18_000_000),
       })
+      viewerRef.current = viewer
     })()
 
     return () => {
       cancelled = true
+      if (intervalRef.current) clearInterval(intervalRef.current)
       viewerRef.current?.destroy()
       viewerRef.current = null
     }
-  }, [satellites])
+  }, [])
+
+  // ── satellite entities + live update ─────────────────────────────────────
+  useEffect(() => {
+    if (!CESIUM_TOKEN || tles.length === 0) return
+    if (intervalRef.current) clearInterval(intervalRef.current)
+
+    const updatePositions = async () => {
+      const viewer = viewerRef.current
+      if (!viewer || viewer.isDestroyed()) return
+      const Cesium = await loadCesium()
+      if (!Cesium) return
+
+      const { twoline2satrec, propagate, gstime, eciToGeodetic, degreesLat, degreesLong } =
+        await import('satellite.js')
+
+      const eciToCartesian = (
+        pos: { x: number; y: number; z: number },
+        gst: number,
+        C: typeof Cesium,
+      ): import('cesium').Cartesian3 | null => {
+        const geo = eciToGeodetic(pos, gst)
+        const lat = degreesLat(geo.latitude)
+        const lon = degreesLong(geo.longitude)
+        const altM = geo.height * 1000  // km → m
+        return C.Cartesian3.fromDegrees(lon, lat, altM)
+      }
+
+      for (const tle of tles) {
+        const satName = satellites.find(s => s.id === tle.satellite_id)?.name ?? tle.satellite_id
+        const satrec = twoline2satrec(tle.tle_line1, tle.tle_line2)
+
+        const now = new Date()
+        const posVel = propagate(satrec, now)
+        if (!posVel.position || typeof posVel.position === 'boolean') continue
+
+        const gst = gstime(now)
+        const cartesian = eciToCartesian(posVel.position as { x: number; y: number; z: number }, gst, Cesium)
+        if (!cartesian) continue
+
+        if (entitiesRef.current.has(tle.satellite_id)) {
+          const entity = entitiesRef.current.get(tle.satellite_id)!
+          ;(entity.position as unknown as { setValue: (v: typeof cartesian) => void })
+            .setValue(cartesian)
+        } else {
+          // Compute orbit trail (next 90 min)
+          const trailPositions: import('cesium').Cartesian3[] = []
+          for (let i = 0; i <= TRAIL_MINUTES; i += TRAIL_STEP_S / 60) {
+            const t = new Date(now.getTime() + i * 60 * 1000)
+            const pv = propagate(satrec, t)
+            if (!pv.position || typeof pv.position === 'boolean') continue
+            const c = eciToCartesian(
+              pv.position as { x: number; y: number; z: number },
+              gstime(t),
+              Cesium
+            )
+            if (c) trailPositions.push(c)
+          }
+
+          const entity = viewer.entities.add({
+            name: satName,
+            position: new Cesium.ConstantPositionProperty(cartesian),
+            point: {
+              pixelSize: 9,
+              color: Cesium.Color.CYAN,
+              outlineColor: Cesium.Color.WHITE,
+              outlineWidth: 1,
+            },
+            label: {
+              text: satName,
+              font: '11px monospace',
+              fillColor: Cesium.Color.WHITE,
+              outlineColor: Cesium.Color.BLACK,
+              outlineWidth: 2,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              pixelOffset: new Cesium.Cartesian2(0, -18),
+            },
+            polyline: trailPositions.length > 1 ? {
+              positions: trailPositions,
+              width: 1,
+              material: new Cesium.ColorMaterialProperty(
+                Cesium.Color.CYAN.withAlpha(0.3)
+              ),
+            } : undefined,
+          })
+          entitiesRef.current.set(tle.satellite_id, entity)
+        }
+      }
+    }
+
+    void updatePositions()
+    intervalRef.current = setInterval(() => { void updatePositions() }, 2000)
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current)
+      entitiesRef.current.forEach((_, id) => {
+        viewerRef.current?.entities.removeById(id)
+      })
+      entitiesRef.current.clear()
+    }
+  }, [tles, satellites])
 
   if (!CESIUM_TOKEN) {
     return (
-      <div className="flex h-full w-full flex-col items-center justify-center rounded-lg border border-space-border bg-space-panel">
+      <div className="flex h-full w-full flex-col items-center justify-center rounded-lg border border-gray-800 bg-gray-900">
         <div className="text-center">
           <div className="mb-3 text-5xl">🛰️</div>
-          <p className="font-mono text-sm font-semibold text-gray-300">
-            3D Globe Unavailable
+          <p className="text-sm font-semibold text-gray-300">3D Globe Unavailable</p>
+          <p className="mt-1 max-w-xs text-xs text-gray-500">
+            Set <code className="rounded bg-gray-800 px-1 text-yellow-400">VITE_CESIUM_TOKEN</code>{' '}
+            in <code className="rounded bg-gray-800 px-1 text-yellow-400">.env</code>
           </p>
-          <p className="mt-1 max-w-xs font-mono text-xs text-gray-500">
-            Set{' '}
-            <code className="rounded bg-gray-800 px-1 py-0.5 text-yellow-400">
-              VITE_CESIUM_TOKEN
-            </code>{' '}
-            in your{' '}
-            <code className="rounded bg-gray-800 px-1 py-0.5 text-yellow-400">
-              .env
-            </code>{' '}
-            file to enable Cesium Ion 3D globe.
-          </p>
-          {satellites.length > 0 && (
-            <div className="mt-4 space-y-1">
-              <p className="font-mono text-xs text-gray-500">
-                {satellites.length} satellite(s) tracked:
-              </p>
-              {satellites.map((s) => (
-                <p key={s.id} className="font-mono text-xs text-gray-400">
-                  {s.name}
-                  {s.norad_id !== undefined && ` (NORAD ${s.norad_id})`}
-                </p>
-              ))}
-            </div>
-          )}
         </div>
       </div>
     )
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="h-full w-full rounded-lg overflow-hidden"
-      style={{ minHeight: '400px' }}
-    />
+    <div ref={containerRef} className="h-full w-full rounded-lg overflow-hidden" style={{ minHeight: 400 }} />
   )
 }

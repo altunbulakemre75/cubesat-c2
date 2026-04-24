@@ -1,12 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { fetchSatellites } from '../api/satellites'
+import { fetchSatellites, fetchAllTLEs } from '../api/satellites'
 import { SatelliteCard } from '../components/SatelliteCard'
 import { AlertBanner } from '../components/AlertBanner'
 import { CesiumGlobe } from '../components/CesiumGlobe'
 import { useAppStore } from '../store'
 import type { AppEvent } from '../types'
-import type { SatelliteDetail } from '../types'
 
 function formatEventTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], {
@@ -54,9 +53,13 @@ export function Dashboard() {
     refetchInterval: 30_000,
   })
 
-  // Cast to SatelliteDetail[] for CesiumGlobe (which accepts SatelliteDetail[])
-  // Most fields missing from SatelliteListItem are optional in SatelliteDetail
-  const globeSatellites: SatelliteDetail[] = (satellites ?? []) as SatelliteDetail[]
+  // Fetch TLEs for all satellites (only those that have one will show on globe)
+  const { data: tles = [] } = useQuery({
+    queryKey: ['tles', satellites?.map(s => s.id)],
+    queryFn: () => fetchAllTLEs((satellites ?? []).map(s => s.id)),
+    enabled: (satellites?.length ?? 0) > 0,
+    refetchInterval: 300_000,   // re-check every 5 min
+  })
 
   return (
     <div className="flex h-full">
@@ -117,7 +120,7 @@ export function Dashboard() {
           </h2>
         </div>
         <div className="flex-1 p-3">
-          <CesiumGlobe satellites={globeSatellites} />
+          <CesiumGlobe satellites={satellites ?? []} tles={tles} />
         </div>
       </div>
 
