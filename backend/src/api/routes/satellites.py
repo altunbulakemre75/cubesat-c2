@@ -2,7 +2,9 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from pydantic import BaseModel
+from sgp4.api import Satrec, WGS84
 
+from src.api.audit import log_action
 from src.api.deps import CurrentUser, Pool
 from src.api.rbac import Role, require_role
 from src.api.schemas import SatelliteDetail, SatelliteListItem, TLEResponse
@@ -81,14 +83,18 @@ async def create_satellite(body: SatelliteCreate, pool: Pool, user: CurrentUser)
 @router.delete("/{satellite_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_satellite(satellite_id: str, pool: Pool, user: CurrentUser):
     require_role(Role.ADMIN, user["role"])
+    # Sorun 4: tüm DELETE'ler tek transaction — biri başarısız olursa rollback
     async with pool.acquire() as conn:
-        # Hard delete — ON DELETE CASCADE removes TLE history and commands.
-        # Telemetry (hypertable) is deleted separately since there is no FK.
-        await conn.execute("DELETE FROM telemetry WHERE satellite_id = $1", satellite_id)
-        await conn.execute("DELETE FROM pass_schedule WHERE satellite_id = $1", satellite_id)
-        result = await conn.execute("DELETE FROM satellites WHERE id = $1", satellite_id)
+        async with conn.transaction():
+            await conn.execute("DELETE FROM telemetry WHERE satellite_id = $1", satellite_id)
+            await conn.execute("DELETE FROM pass_schedule WHERE satellite_id = $1", satellite_id)
+            result = await conn.execute("DELETE FROM satellites WHERE id = $1", satellite_id)
+
     if result == "DELETE 0":
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Satellite '{satellite_id}' not found")
+
+    await log_action(pool, user["username"], "satellite.delete",
+                     target_id=satellite_id, target_type="satellite")
 
 
 @router.get("/{satellite_id}", response_model=SatelliteDetail)
@@ -139,6 +145,31 @@ async def set_tle(
     background_tasks: BackgroundTasks,
 ):
     require_role(Role.OPERATOR, user["role"])
+
+    # Sorun 3: TLE format + checksum validation via sgp4
+    tle1 = body.tle_line1.strip()
+    tle2 = body.tle_line2.strip()
+
+    if len(tle1) != 69 or len(tle2) != 69:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"TLE lines must be exactly 69 characters (got {len(tle1)}, {len(tle2)})",
+        )
+    if not tle1.startswith("1 ") or not tle2.startswith("2 "):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="TLE line 1 must start with '1 ', line 2 must start with '2 '",
+        )
+    try:
+        sat = Satrec.twoline2rv(tle1, tle2, WGS84)
+        e, _r, _v = sat.sgp4(sat.jdsatepoch, sat.jdsatepochF)
+        if e != 0:
+            raise ValueError(f"SGP4 propagation error code {e}")
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid TLE: {exc}",
+        ) from exc
 
     # Auto-register satellite if it doesn't exist
     async with pool.acquire() as conn:

@@ -39,8 +39,8 @@ export function UserManagement() {
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
     setFormError('')
-    if (password.length < 6) {
-      setFormError('Şifre en az 6 karakter olmalı')
+    if (password.length < 12) {
+      setFormError('Password must be at least 12 characters')
       return
     }
     createMut.mutate({ username, email, password, role })
@@ -79,7 +79,7 @@ export function UserManagement() {
               <label className="block text-xs text-gray-400 mb-1 uppercase tracking-wider">Password</label>
               <input required type="password" value={password} onChange={(e) => setPassword(e.target.value)}
                      className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-1.5 font-mono text-sm text-white focus:outline-none focus:border-blue-500"
-                     placeholder="min 6 chars" />
+                     placeholder="min 12 chars" />
             </div>
             <div>
               <label className="block text-xs text-gray-400 mb-1 uppercase tracking-wider">Role</label>

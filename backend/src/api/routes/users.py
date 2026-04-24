@@ -1,11 +1,14 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, status
 
+from src.api.audit import log_action
 from src.api.auth import hash_password
 from src.api.deps import CurrentUser, Pool
 from src.api.rbac import Role, require_role
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+_MIN_PASSWORD_LEN = 12
 
 
 class UserCreate(BaseModel):
@@ -37,9 +40,18 @@ async def list_users(pool: Pool, user: CurrentUser):
 async def create_user(body: UserCreate, pool: Pool, user: CurrentUser):
     require_role(Role.ADMIN, user["role"])
 
+    # Sorun 1: password policy backend'de de kontrol edilmeli (frontend bypass'ı önler)
+    if len(body.password) < _MIN_PASSWORD_LEN:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Password must be at least {_MIN_PASSWORD_LEN} characters",
+        )
+
     if body.role not in ("viewer", "operator", "admin"):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                            detail="Role must be viewer, operator, or admin")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Role must be viewer, operator, or admin",
+        )
 
     hashed = hash_password(body.password)
     async with pool.acquire() as conn:
@@ -54,22 +66,56 @@ async def create_user(body: UserCreate, pool: Pool, user: CurrentUser):
             )
         except Exception as exc:
             if "unique" in str(exc).lower():
-                raise HTTPException(status.HTTP_409_CONFLICT,
-                                    detail="Username or email already exists")
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    detail="Username or email already exists",
+                )
             raise
+    await log_action(pool, user["username"], "user.create",
+                     target_id=body.username, target_type="user",
+                     details={"role": body.role})
     return UserOut(**dict(row))
 
 
 @router.patch("/{username}/role")
 async def change_role(username: str, role: str, pool: Pool, user: CurrentUser):
     require_role(Role.ADMIN, user["role"])
+
     if role not in ("viewer", "operator", "admin"):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                            detail="Invalid role")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid role"
+        )
+
+    # Sorun 2a: admin kendi rolünü düşüremesin
+    if username == user["username"] and role != "admin":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Cannot change your own admin role. Ask another admin.",
+        )
+
+    # Sorun 2b: sistemdeki son admin silinemez
     async with pool.acquire() as conn:
-        result = await conn.execute(
+        target = await conn.fetchrow(
+            "SELECT role FROM users WHERE username = $1", username
+        )
+        if not target:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        if target["role"] == "admin" and role != "admin":
+            admin_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = TRUE"
+            )
+            if admin_count <= 1:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot demote the last admin. Create another admin first.",
+                )
+
+        await conn.execute(
             "UPDATE users SET role = $1 WHERE username = $2", role, username
         )
-    if result == "UPDATE 0":
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    await log_action(pool, user["username"], "user.role_change",
+                     target_id=username, target_type="user",
+                     details={"new_role": role})
     return {"username": username, "role": role}
