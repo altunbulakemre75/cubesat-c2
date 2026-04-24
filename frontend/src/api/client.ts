@@ -35,9 +35,24 @@ apiClient.interceptors.response.use(
   },
 )
 
-export async function login(username: string, password: string): Promise<void> {
-  const res = await apiClient.post<{ access_token: string }>('/auth/login', { username, password })
+export interface LoginResult {
+  mustChangePassword: boolean
+}
+
+export async function login(username: string, password: string): Promise<LoginResult> {
+  const res = await apiClient.post<{
+    access_token: string
+    must_change_password: boolean
+  }>('/auth/login', { username, password })
   useAppStore.getState().setAuth(res.data.access_token, username)
+  return { mustChangePassword: res.data.must_change_password }
+}
+
+export async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
+  await apiClient.post('/auth/change-password', {
+    old_password: oldPassword,
+    new_password: newPassword,
+  })
 }
 
 export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL ?? 'ws://localhost:8000'

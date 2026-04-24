@@ -72,7 +72,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - NATS_URL=nats://nats:4222
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-change-in-production}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - DEBUG=true
       - LOG_LEVEL=INFO
     volumes:

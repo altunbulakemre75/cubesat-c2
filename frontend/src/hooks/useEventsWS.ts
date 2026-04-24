@@ -16,7 +16,14 @@ export function useEventsWS(): void {
   const connect = useCallback(() => {
     if (!mountedRef.current) return
 
-    const url = `${WS_BASE_URL}/ws/events`
+    const token = useAppStore.getState().token
+    if (!token) {
+      // No auth — skip WS connection; will retry when a token lands
+      retryTimerRef.current = setTimeout(connect, 2000)
+      return
+    }
+
+    const url = `${WS_BASE_URL}/ws/events?token=${encodeURIComponent(token)}`
     const ws = new WebSocket(url)
     wsRef.current = ws
 

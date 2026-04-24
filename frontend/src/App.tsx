@@ -7,6 +7,7 @@ import { SatelliteDetail } from './pages/SatelliteDetail'
 import { CommandCenter } from './pages/CommandCenter'
 import { PassSchedule } from './pages/PassSchedule'
 import { Login } from './pages/Login'
+import { ChangePassword } from './pages/ChangePassword'
 import { UserManagement } from './pages/UserManagement'
 import { useAppStore } from './store'
 
@@ -70,6 +71,14 @@ export function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
+          <Route
+            path="/change-password"
+            element={
+              <RequireAuth>
+                <ChangePassword />
+              </RequireAuth>
+            }
+          />
             <Route
               element={
                 <RequireAuth>

@@ -14,8 +14,12 @@ export function Login() {
     setError('')
     setLoading(true)
     try {
-      await login(username, password)
-      navigate('/', { replace: true })
+      const result = await login(username, password)
+      if (result.mustChangePassword) {
+        navigate('/change-password', { replace: true })
+      } else {
+        navigate('/', { replace: true })
+      }
     } catch {
       setError('Kullanıcı adı veya şifre hatalı.')
     } finally {
@@ -81,7 +85,7 @@ export function Login() {
         </div>
 
         <p className="text-center text-gray-600 text-xs mt-4">
-          Varsayılan: admin / admin123
+          İlk kurulumda admin şifresi backend loglarında görünür.
         </p>
       </div>
     </div>

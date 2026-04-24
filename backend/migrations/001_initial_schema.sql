@@ -164,12 +164,5 @@ CREATE TABLE IF NOT EXISTS pass_schedule (
 CREATE INDEX IF NOT EXISTS idx_pass_schedule_satellite_aos
     ON pass_schedule (satellite_id, aos);
 
--- Default admin user (password: admin123 — change immediately in production)
--- bcrypt hash of 'admin123'
-INSERT INTO users (username, email, password_hash, role)
-VALUES (
-    'admin',
-    'admin@cubesat-c2.local',
-    '$2b$12$yiDr9tvZD6xHMEIWGb1nNuHx8UNiGHcU9Cl9niknu8/m4gGltS9Ry',
-    'admin'
-) ON CONFLICT DO NOTHING;
+-- Admin user is bootstrapped in Python (src/api/bootstrap.py) with a random
+-- password printed to the startup log exactly once. No hardcoded credentials.

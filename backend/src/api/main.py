@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from src.api.bootstrap import ensure_admin_user
 from src.api.routes import anomalies, auth, commands, passes, satnogs, satellites, stations, telemetry, users
 from src.api.ws import router as ws_router
 from src.config import settings
@@ -33,6 +34,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # ── startup ──────────────────────────────────────────────────────────────
     pool = await get_pool()
     await run_migrations(pool)
+    await ensure_admin_user(pool)
 
     nc = await nats.connect(settings.nats_url)
     js = nc.jetstream()

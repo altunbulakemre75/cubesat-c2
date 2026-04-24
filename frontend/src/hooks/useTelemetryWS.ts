@@ -16,7 +16,13 @@ export function useTelemetryWS(satelliteId: string | null): void {
   const connect = useCallback(() => {
     if (!satelliteId || !mountedRef.current) return
 
-    const url = `${WS_BASE_URL}/ws/telemetry/${satelliteId}`
+    const token = useAppStore.getState().token
+    if (!token) {
+      retryTimerRef.current = setTimeout(connect, 2000)
+      return
+    }
+
+    const url = `${WS_BASE_URL}/ws/telemetry/${satelliteId}?token=${encodeURIComponent(token)}`
     const ws = new WebSocket(url)
     wsRef.current = ws
 
