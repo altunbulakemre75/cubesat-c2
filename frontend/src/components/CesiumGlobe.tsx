@@ -9,10 +9,17 @@ async function loadCesium() {
   catch { return null }
 }
 
+let SatjsModule: typeof import('satellite.js') | null = null
+async function loadSatjs() {
+  if (SatjsModule) return SatjsModule
+  try { SatjsModule = await import('satellite.js'); return SatjsModule }
+  catch { return null }
+}
+
 const CESIUM_TOKEN = import.meta.env.VITE_CESIUM_TOKEN as string | undefined
 
-// Orbit trail: compute positions every 60s for the next 90 minutes (one LEO orbit)
-const TRAIL_STEP_S = 60
+// Orbit trail: 90-minute lookahead polyline (one LEO orbit)
+const TRAIL_STEP_MIN = 1
 const TRAIL_MINUTES = 90
 
 interface Props {
@@ -23,8 +30,7 @@ interface Props {
 export function CesiumGlobe({ satellites, tles }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<import('cesium').Viewer | null>(null)
-  const entitiesRef = useRef<Map<string, import('cesium').Entity>>(new Map())
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const entityIdsRef = useRef<Set<string>>(new Set())
 
   // ── initial viewer setup ──────────────────────────────────────────────────
   useEffect(() => {
@@ -59,109 +65,105 @@ export function CesiumGlobe({ satellites, tles }: Props) {
 
     return () => {
       cancelled = true
-      if (intervalRef.current) clearInterval(intervalRef.current)
       viewerRef.current?.destroy()
       viewerRef.current = null
+      entityIdsRef.current.clear()
     }
   }, [])
 
-  // ── satellite entities + live update ─────────────────────────────────────
+  // ── satellite entities using CallbackProperty (Cesium recomputes each frame) ─
   useEffect(() => {
-    if (!CESIUM_TOKEN || tles.length === 0) return
-    if (intervalRef.current) clearInterval(intervalRef.current)
+    if (!CESIUM_TOKEN) return
+    let cancelled = false
 
-    const updatePositions = async () => {
+    void (async () => {
       const viewer = viewerRef.current
       if (!viewer || viewer.isDestroyed()) return
       const Cesium = await loadCesium()
-      if (!Cesium) return
+      const satjs = await loadSatjs()
+      if (cancelled || !Cesium || !satjs) return
 
-      const { twoline2satrec, propagate, gstime, eciToGeodetic, degreesLat, degreesLong } =
-        await import('satellite.js')
+      const { twoline2satrec, propagate, gstime, eciToGeodetic, degreesLat, degreesLong } = satjs
 
-      const eciToCartesian = (
-        pos: { x: number; y: number; z: number },
-        gst: number,
-        C: typeof Cesium,
-      ): import('cesium').Cartesian3 | null => {
+      // Remove stale entities (satellites no longer in the TLE list)
+      const wantedIds = new Set(tles.map(t => t.satellite_id))
+      for (const id of Array.from(entityIdsRef.current)) {
+        if (!wantedIds.has(id)) {
+          viewer.entities.removeById(id)
+          entityIdsRef.current.delete(id)
+        }
+      }
+
+      const eciToCartesian = (pos: { x: number; y: number; z: number }, gst: number) => {
         const geo = eciToGeodetic(pos, gst)
-        const lat = degreesLat(geo.latitude)
-        const lon = degreesLong(geo.longitude)
-        const altM = geo.height * 1000  // km → m
-        return C.Cartesian3.fromDegrees(lon, lat, altM)
+        return Cesium.Cartesian3.fromDegrees(
+          degreesLong(geo.longitude),
+          degreesLat(geo.latitude),
+          geo.height * 1000,
+        )
       }
 
       for (const tle of tles) {
+        if (entityIdsRef.current.has(tle.satellite_id)) continue
+
         const satName = satellites.find(s => s.id === tle.satellite_id)?.name ?? tle.satellite_id
         const satrec = twoline2satrec(tle.tle_line1, tle.tle_line2)
 
+        // Precompute orbit trail (static 90-min future polyline)
         const now = new Date()
-        const posVel = propagate(satrec, now)
-        if (!posVel.position || typeof posVel.position === 'boolean') continue
-
-        const gst = gstime(now)
-        const cartesian = eciToCartesian(posVel.position as { x: number; y: number; z: number }, gst, Cesium)
-        if (!cartesian) continue
-
-        if (entitiesRef.current.has(tle.satellite_id)) {
-          const entity = entitiesRef.current.get(tle.satellite_id)!
-          ;(entity.position as unknown as { setValue: (v: typeof cartesian) => void })
-            .setValue(cartesian)
-        } else {
-          // Compute orbit trail (next 90 min)
-          const trailPositions: import('cesium').Cartesian3[] = []
-          for (let i = 0; i <= TRAIL_MINUTES; i += TRAIL_STEP_S / 60) {
-            const t = new Date(now.getTime() + i * 60 * 1000)
-            const pv = propagate(satrec, t)
-            if (!pv.position || typeof pv.position === 'boolean') continue
-            const c = eciToCartesian(
-              pv.position as { x: number; y: number; z: number },
-              gstime(t),
-              Cesium
-            )
-            if (c) trailPositions.push(c)
-          }
-
-          const entity = viewer.entities.add({
-            name: satName,
-            position: new Cesium.ConstantPositionProperty(cartesian),
-            point: {
-              pixelSize: 9,
-              color: Cesium.Color.CYAN,
-              outlineColor: Cesium.Color.WHITE,
-              outlineWidth: 1,
-            },
-            label: {
-              text: satName,
-              font: '11px monospace',
-              fillColor: Cesium.Color.WHITE,
-              outlineColor: Cesium.Color.BLACK,
-              outlineWidth: 2,
-              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-              pixelOffset: new Cesium.Cartesian2(0, -18),
-            },
-            polyline: trailPositions.length > 1 ? {
-              positions: trailPositions,
-              width: 1,
-              material: new Cesium.ColorMaterialProperty(
-                Cesium.Color.CYAN.withAlpha(0.3)
-              ),
-            } : undefined,
-          })
-          entitiesRef.current.set(tle.satellite_id, entity)
+        const trailPositions: import('cesium').Cartesian3[] = []
+        for (let i = 0; i <= TRAIL_MINUTES; i += TRAIL_STEP_MIN) {
+          const t = new Date(now.getTime() + i * 60 * 1000)
+          const pv = propagate(satrec, t)
+          if (!pv.position || typeof pv.position === 'boolean') continue
+          trailPositions.push(
+            eciToCartesian(pv.position as { x: number; y: number; z: number }, gstime(t)),
+          )
         }
-      }
-    }
 
-    void updatePositions()
-    intervalRef.current = setInterval(() => { void updatePositions() }, 2000)
+        // CallbackProperty — Cesium invokes this each render frame.
+        // No manual setValue / setInterval needed. Old positions are never
+        // retained, so we don't get a trail of stale dots.
+        // CallbackPositionProperty (Cesium 1.120+): position callback
+        // invoked every render frame — no trail of stale dots.
+        const positionCb = new Cesium.CallbackPositionProperty(() => {
+          const t = new Date()
+          const pv = propagate(satrec, t)
+          if (!pv.position || typeof pv.position === 'boolean') return undefined
+          return eciToCartesian(pv.position as { x: number; y: number; z: number }, gstime(t))
+        }, false)
+
+        viewer.entities.add({
+          id: tle.satellite_id,
+          name: satName,
+          position: positionCb,
+          point: {
+            pixelSize: 9,
+            color: Cesium.Color.CYAN,
+            outlineColor: Cesium.Color.WHITE,
+            outlineWidth: 1,
+          },
+          label: {
+            text: satName,
+            font: '11px monospace',
+            fillColor: Cesium.Color.WHITE,
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 2,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            pixelOffset: new Cesium.Cartesian2(0, -18),
+          },
+          polyline: trailPositions.length > 1 ? {
+            positions: trailPositions,
+            width: 1,
+            material: new Cesium.ColorMaterialProperty(Cesium.Color.CYAN.withAlpha(0.3)),
+          } : undefined,
+        })
+        entityIdsRef.current.add(tle.satellite_id)
+      }
+    })()
 
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
-      entitiesRef.current.forEach((_, id) => {
-        viewerRef.current?.entities.removeById(id)
-      })
-      entitiesRef.current.clear()
+      cancelled = true
     }
   }, [tles, satellites])
 
