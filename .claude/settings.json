@@ -2,6 +2,9 @@
   "permissions": {
     "additionalDirectories": [
       "c:\\Users\\altun\\Desktop\\Yeni klasör\\cubesat-c2"
+    ],
+    "allow": [
+      "Bash(git commit -m 'fix\\(frontend\\): handle null battery_voltage in BatteryBar + add ErrorBoundary *)"
     ]
   }
 }
