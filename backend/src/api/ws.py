@@ -18,6 +18,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 from jose import JWTError
 
 from src.api.auth import decode_token
+from src.api.metrics import websocket_connections_active
 from src.config import settings
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ async def ws_telemetry(
     js = nc.jetstream()
     subject = f"telemetry.canonical.{satellite_id}"
     sub = await js.subscribe(subject)
+    websocket_connections_active.labels(channel="telemetry").inc()
     logger.info("WS telemetry | user=%s sat=%s", user["username"], satellite_id)
 
     try:
@@ -77,6 +79,7 @@ async def ws_telemetry(
         except Exception:  # noqa: BLE001
             pass
         await nc.close()
+        websocket_connections_active.labels(channel="telemetry").dec()
         logger.info("WS telemetry closed | sat=%s", satellite_id)
 
 
@@ -101,6 +104,7 @@ async def ws_events(
     nc = await nats.connect(settings.nats_url)
     js = nc.jetstream()
     sub = await js.subscribe("events.>")
+    websocket_connections_active.labels(channel="events").inc()
     logger.info("WS events | user=%s", user["username"])
 
     try:
@@ -120,4 +124,5 @@ async def ws_events(
         except Exception:  # noqa: BLE001
             pass
         await nc.close()
+        websocket_connections_active.labels(channel="events").dec()
         logger.info("WS events closed | user=%s", user["username"])

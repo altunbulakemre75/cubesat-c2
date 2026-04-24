@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, status
 from src.api.audit import log_action
 from src.api.auth import create_access_token, hash_password, verify_password
 from src.api.deps import CurrentUser, Pool
+from src.api.metrics import auth_login_total
 from src.api.schemas import LoginRequest, TokenResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -28,13 +29,16 @@ async def login(body: LoginRequest, pool: Pool):
         )
 
     if not row or not verify_password(body.password, row["password_hash"]):
+        auth_login_total.labels(result="failed").inc()
         await log_action(pool, body.username, "auth.login", result="failed")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     if not row["active"]:
+        auth_login_total.labels(result="disabled").inc()
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account disabled")
 
     token = create_access_token(subject=row["username"], role=row["role"])
+    auth_login_total.labels(result="ok").inc()
     await log_action(pool, row["username"], "auth.login", result="ok")
     return TokenResponse(
         access_token=token,

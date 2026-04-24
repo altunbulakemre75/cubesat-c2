@@ -4,7 +4,7 @@ SatNOGS integration endpoints.
 POST /satnogs/sync/{satellite_id}?norad_id=25544
   → Fetches TLE from SatNOGS DB, stores it, triggers pass computation.
 
-POST /satnogs/import-stations
+POST /satnogs/import-stations?scope=turkey|europe|world
   → Imports online SatNOGS stations into ground_stations table.
 """
 
@@ -12,11 +12,21 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 
+from src.api.audit import log_action
 from src.api.deps import CurrentUser, Pool
 from src.api.rbac import Role, require_role
 from src.api.routes.satellites import _compute_and_store_passes, _parse_tle_epoch
 from src.config import settings
 from src.ingestion.satnogs_client import SatNOGSClient
+
+# Pre-defined bounding boxes (lat_min, lat_max, lon_min, lon_max)
+_BBOX_SCOPES = {
+    "turkey": (35.0, 43.0, 25.0, 45.0),
+    "europe": (34.0, 72.0, -25.0, 45.0),
+    "americas": (-56.0, 72.0, -170.0, -30.0),
+    "asia_pacific": (-50.0, 55.0, 60.0, 180.0),
+    "world": (-90.0, 90.0, -180.0, 180.0),
+}
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/satnogs", tags=["satnogs"])
@@ -80,16 +90,36 @@ async def sync_satellite(
 async def import_satnogs_stations(
     pool: Pool,
     user: CurrentUser,
-    min_lat: float = Query(default=35.0),
-    max_lat: float = Query(default=43.0),
-    min_lon: float = Query(default=25.0),
-    max_lon: float = Query(default=45.0),
+    scope: str = Query(
+        default="turkey",
+        description=f"Region preset: {', '.join(_BBOX_SCOPES)}",
+    ),
+    limit: int = Query(default=200, ge=1, le=2000, description="Max stations to import"),
+    min_lat: float | None = Query(default=None, description="Override scope bbox"),
+    max_lat: float | None = Query(default=None),
+    min_lon: float | None = Query(default=None),
+    max_lon: float | None = Query(default=None),
 ):
     """
     Import SatNOGS online stations into ground_stations table.
-    Default bounding box covers Turkey. Skips already-imported stations.
+    Skips already-imported stations (ON CONFLICT DO NOTHING on satnogs_id).
+
+    Use ?scope=world to pull the entire SatNOGS network (capped by limit).
     """
     require_role(Role.ADMIN, user["role"])
+
+    # Resolve bbox: custom if all 4 provided, otherwise scope preset
+    if all(x is not None for x in (min_lat, max_lat, min_lon, max_lon)):
+        bbox = (min_lat, max_lat, min_lon, max_lon)
+    else:
+        if scope not in _BBOX_SCOPES:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Unknown scope '{scope}'. Options: {sorted(_BBOX_SCOPES)}",
+            )
+        bbox = _BBOX_SCOPES[scope]
+
+    lat_min, lat_max, lon_min, lon_max = bbox
 
     client = SatNOGSClient(api_token=getattr(settings, "satnogs_api_token", None))
     try:
@@ -97,20 +127,20 @@ async def import_satnogs_stations(
     finally:
         await client.close()
 
-    # Filter by bounding box
     filtered = [
         s for s in stations
         if s.get("lat") is not None and s.get("lng") is not None
-        and min_lat <= float(s["lat"]) <= max_lat
-        and min_lon <= float(s["lng"]) <= max_lon
-    ]
+        and lat_min <= float(s["lat"]) <= lat_max
+        and lon_min <= float(s["lng"]) <= lon_max
+    ][:limit]
 
     imported = 0
     async with pool.acquire() as conn:
         for s in filtered:
             result = await conn.execute(
                 """
-                INSERT INTO ground_stations (name, satnogs_id, latitude_deg, longitude_deg, elevation_m)
+                INSERT INTO ground_stations
+                  (name, satnogs_id, latitude_deg, longitude_deg, elevation_m)
                 VALUES ($1,$2,$3,$4,$5)
                 ON CONFLICT (satnogs_id) DO NOTHING
                 """,
@@ -123,4 +153,15 @@ async def import_satnogs_stations(
             if result != "INSERT 0 0":
                 imported += 1
 
-    return {"imported": imported, "found_in_bbox": len(filtered), "total_online": len(stations)}
+    await log_action(
+        pool, user["username"], "satnogs.import_stations",
+        details={"scope": scope, "imported": imported, "filtered": len(filtered)},
+    )
+
+    return {
+        "scope": scope,
+        "bbox": {"lat_min": lat_min, "lat_max": lat_max, "lon_min": lon_min, "lon_max": lon_max},
+        "imported": imported,
+        "found_in_bbox": len(filtered),
+        "total_online": len(stations),
+    }

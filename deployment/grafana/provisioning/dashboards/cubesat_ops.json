@@ -1,46 +1,4 @@
 {
-  "__inputs": [
-    {
-      "name": "DS_PROMETHEUS",
-      "label": "Prometheus",
-      "description": "",
-      "type": "datasource",
-      "pluginId": "prometheus",
-      "pluginName": "Prometheus"
-    }
-  ],
-  "__requires": [
-    {
-      "type": "grafana",
-      "id": "grafana",
-      "name": "Grafana",
-      "version": "10.0.0"
-    },
-    {
-      "type": "datasource",
-      "id": "prometheus",
-      "name": "Prometheus",
-      "version": "1.0.0"
-    },
-    {
-      "type": "panel",
-      "id": "timeseries",
-      "name": "Time series",
-      "version": ""
-    },
-    {
-      "type": "panel",
-      "id": "stat",
-      "name": "Stat",
-      "version": ""
-    },
-    {
-      "type": "panel",
-      "id": "gauge",
-      "name": "Gauge",
-      "version": ""
-    }
-  ],
   "annotations": {
     "list": [
       {
@@ -54,7 +12,7 @@
       }
     ]
   },
-  "description": "CubeSat C2 Operations Dashboard — telemetry, commands, NATS messaging, API latency, and anomaly detection",
+  "description": "CubeSat C2 Operations Dashboard — satellites, telemetry, commands, anomalies, FDIR, and auth",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -62,81 +20,8 @@
   "links": [],
   "panels": [
     {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
-      "id": 100,
-      "title": "Telemetry",
-      "type": "row"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "description": "Number of telemetry records ingested per minute across all satellites",
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "records/min",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 15,
-            "gradientMode": "none",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
-            "insertNulls": false,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "scaleDistribution": { "type": "linear" },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": { "group": "A", "mode": "none" },
-            "thresholdsStyle": { "mode": "off" }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 80 }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
-      "id": 1,
-      "options": {
-        "legend": { "calcs": ["mean", "max", "lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
-      },
-      "targets": [
-        {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "editorMode": "code",
-          "expr": "rate(cubesat_telemetry_records_total[1m]) * 60",
-          "legendFormat": "Ingestion rate (all)",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "editorMode": "code",
-          "expr": "sum by (satellite_id) (rate(cubesat_telemetry_records_total{satellite_id=~\".+\"}[1m]) * 60)",
-          "legendFormat": "{{satellite_id}}",
-          "range": true,
-          "refId": "B"
-        }
-      ],
-      "title": "Telemetry Ingestion Rate (records/min)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "description": "Number of satellites currently reporting telemetry (seen in the last 2 minutes)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Number of satellites currently active in the C2 system",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -144,16 +29,56 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "yellow", "value": 1 },
-              { "color": "green", "value": 2 }
+              { "color": "orange", "value": null },
+              { "color": "green", "value": 1 }
             ]
           },
-          "unit": "none"
+          "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 1 },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "editorMode": "code",
+          "expr": "cubesat_satellites_active",
+          "instant": true,
+          "legendFormat": "Active Satellites",
+          "refId": "A"
+        }
+      ],
+      "title": "Active Satellites",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Number of ground stations currently active in the C2 system",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "orange", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 },
       "id": 2,
       "options": {
         "colorMode": "background",
@@ -165,71 +90,61 @@
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "editorMode": "code",
-          "expr": "count(count by (satellite_id) (cubesat_telemetry_records_total{satellite_id=~\".+\"}))",
+          "expr": "cubesat_ground_stations_active",
           "instant": true,
-          "legendFormat": "Active Satellites",
+          "legendFormat": "Active Ground Stations",
           "refId": "A"
         }
       ],
-      "title": "Active Satellites",
+      "title": "Active Ground Stations",
       "type": "stat"
     },
     {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
-      "id": 101,
-      "title": "Commands & NATS",
-      "type": "row"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "description": "Ratio of acknowledged commands to total commands dispatched",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Total live WebSocket connections across all channels (telemetry + events)",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
           "mappings": [],
-          "max": 100,
-          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "yellow", "value": 80 },
-              { "color": "green", "value": 95 }
+              { "color": "orange", "value": null },
+              { "color": "green", "value": 1 }
             ]
           },
-          "unit": "percent"
+          "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 10 },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
       "id": 3,
       "options": {
-        "minVizHeight": 75,
-        "minVizWidth": 75,
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
         "orientation": "auto",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "showThresholdLabels": false,
-        "showThresholdMarkers": true
+        "textMode": "auto"
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "editorMode": "code",
-          "expr": "100 * sum(rate(cubesat_commands_acked_total[5m])) / sum(rate(cubesat_commands_total[5m]))",
+          "expr": "sum(cubesat_websocket_connections_active)",
           "instant": true,
-          "legendFormat": "Success Rate",
+          "legendFormat": "WebSocket Connections",
           "refId": "A"
         }
       ],
-      "title": "Command Success Rate (%)",
-      "type": "gauge"
+      "title": "Live WebSocket Connections",
+      "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "description": "NATS messages published and received per second",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Telemetry records ingested per second, per satellite",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -237,7 +152,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "msg/s",
+            "axisLabel": "records/s",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -258,51 +173,35 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 80 }
+              { "color": "green", "value": null }
             ]
           },
-          "unit": "short"
+          "unit": "none"
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 6, "y": 10 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "id": 4,
       "options": {
-        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"], "showLegend": true },
         "tooltip": { "mode": "multi", "sort": "desc" }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "editorMode": "code",
-          "expr": "rate(gnatsd_varz_in_msgs[1m])",
-          "legendFormat": "In msgs/s",
+          "expr": "rate(cubesat_telemetry_ingested_total[1m])",
+          "legendFormat": "{{satellite_id}}",
           "range": true,
           "refId": "A"
-        },
-        {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "editorMode": "code",
-          "expr": "rate(gnatsd_varz_out_msgs[1m])",
-          "legendFormat": "Out msgs/s",
-          "range": true,
-          "refId": "B"
         }
       ],
-      "title": "NATS Message Rate (msg/s)",
+      "title": "Telemetry Ingestion Rate per Satellite",
       "type": "timeseries"
     },
     {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
-      "id": 102,
-      "title": "API Performance",
-      "type": "row"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "description": "HTTP request latency percentiles (p50, p95, p99) for the backend API",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Commands created per minute, by command type and status",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -310,11 +209,11 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "latency (s)",
+            "axisLabel": "commands/min",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
-            "fillOpacity": 10,
+            "fillOpacity": 15,
             "gradientMode": "none",
             "hideFrom": { "legend": false, "tooltip": false, "viz": false },
             "insertNulls": false,
@@ -331,59 +230,35 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 80 }
+              { "color": "green", "value": null }
             ]
           },
-          "unit": "s"
+          "unit": "cpm"
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "id": 5,
       "options": {
-        "legend": { "calcs": ["mean", "max", "lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"], "showLegend": true },
         "tooltip": { "mode": "multi", "sort": "desc" }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"cubesat-backend\"}[5m])) by (le))",
-          "legendFormat": "p50",
+          "expr": "rate(cubesat_commands_total[1m]) * 60",
+          "legendFormat": "{{command_type}} / {{status}}",
           "range": true,
           "refId": "A"
-        },
-        {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"cubesat-backend\"}[5m])) by (le))",
-          "legendFormat": "p95",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"cubesat-backend\"}[5m])) by (le))",
-          "legendFormat": "p99",
-          "range": true,
-          "refId": "C"
         }
       ],
-      "title": "Backend API Latency (p50 / p95 / p99)",
+      "title": "Commands Created per Minute",
       "type": "timeseries"
     },
     {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
-      "id": 103,
-      "title": "Anomaly Detection",
-      "type": "row"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "description": "Number of telemetry anomalies detected per hour, broken down by type",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Anomalies detected, grouped by severity (warning, critical)",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -391,7 +266,191 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "anomalies/hr",
+            "axisLabel": "anomalies/s",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "warning" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "critical" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "id": 6,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"], "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "editorMode": "code",
+          "expr": "sum by (severity) (rate(cubesat_anomalies_detected_total[5m]))",
+          "legendFormat": "{{severity}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Anomalies by Severity",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Commands denied by policy, by command type and satellite mode",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "denials/s",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "id": 7,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"], "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "editorMode": "code",
+          "expr": "sum by (satellite_mode, command_type) (rate(cubesat_commands_denied_by_policy_total[5m]))",
+          "legendFormat": "{{command_type}} in {{satellite_mode}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Policy-Denied Commands",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "FDIR alerts grouped by reason category",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "alerts/s",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "id": 8,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"], "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "editorMode": "code",
+          "expr": "sum by (reason_category) (rate(cubesat_fdir_alerts_total[5m]))",
+          "legendFormat": "{{reason_category}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "FDIR Alerts by Reason Category",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Login attempts per minute by result (ok, failed, disabled)",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "logins/min",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "bars",
@@ -412,44 +471,62 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 80 }
+              { "color": "green", "value": null }
             ]
           },
-          "unit": "short"
+          "unit": "cpm"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "ok" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "failed" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "disabled" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }
+            ]
+          }
+        ]
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
-      "id": 6,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "id": 9,
       "options": {
-        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"], "showLegend": true },
         "tooltip": { "mode": "multi", "sort": "desc" }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "editorMode": "code",
-          "expr": "sum by (anomaly_type) (increase(cubesat_anomalies_detected_total[1h]))",
-          "legendFormat": "{{anomaly_type}}",
+          "expr": "sum by (result) (rate(cubesat_auth_login_total[1m])) * 60",
+          "legendFormat": "{{result}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Anomaly Detection Count (per hour by type)",
+      "title": "Login Attempts by Result",
       "type": "timeseries"
     }
   ],
   "refresh": "30s",
-  "schemaVersion": 38,
-  "tags": ["cubesat", "operations", "telemetry"],
+  "schemaVersion": 39,
+  "tags": ["cubesat", "mission-control"],
   "templating": {
     "list": []
   },
   "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "CubeSat C2 Operations",
-  "uid": "cubesat-ops-v1",
+  "title": "CubeSat C2 — Operations",
+  "uid": "cubesat-ops",
   "version": 1
 }

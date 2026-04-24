@@ -15,6 +15,7 @@ import asyncpg
 from nats.aio.msg import Msg
 from nats.js import JetStreamContext
 
+from src.api.metrics import telemetry_ingested_total
 from src.ingestion.models import CanonicalTelemetry
 from src.storage import redis_client
 
@@ -62,6 +63,10 @@ class TelemetryWriter:
             await self._write_to_db(telemetry)
             await self._update_cache(telemetry)
             self._written += 1
+            telemetry_ingested_total.labels(
+                satellite_id=telemetry.satellite_id,
+                source=telemetry.source,
+            ).inc()
             logger.debug(
                 "Written | sat=%s seq=%d mode=%s",
                 telemetry.satellite_id,
