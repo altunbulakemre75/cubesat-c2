@@ -23,11 +23,11 @@ type CommandType = (typeof COMMAND_TYPES)[number]
 
 interface CommandModalProps {
   satelliteId: string
-  satelliteMode: SatelliteMode
+  satelliteMode: SatelliteMode | null
   onClose: () => void
 }
 
-function isDisabledInSafeMode(commandType: string, mode: SatelliteMode): boolean {
+function isDisabledInSafeMode(commandType: string, mode: SatelliteMode | null): boolean {
   if (mode !== 'safe') return false
   return !(SAFE_MODE_ALLOWED_COMMANDS as readonly string[]).includes(commandType)
 }

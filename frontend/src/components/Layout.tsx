@@ -13,6 +13,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: '◉' },
   { to: '/commands', label: 'Commands', icon: '⌨' },
   { to: '/passes', label: 'Pass Schedule', icon: '◷' },
+  { to: '/users', label: 'Users', icon: '◉' },
 ]
 
 function SidebarLink({ to, label, icon }: NavItem) {

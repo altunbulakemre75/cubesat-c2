@@ -31,3 +31,27 @@ export async function fetchAllTLEs(satelliteIds: string[]): Promise<TLEData[]> {
   const results = await Promise.all(satelliteIds.map(fetchTLE))
   return results.filter((t): t is TLEData => t !== null)
 }
+
+export interface CreateSatelliteInput {
+  id: string
+  name?: string
+  norad_id?: number | null
+  description?: string
+}
+
+export async function createSatellite(input: CreateSatelliteInput): Promise<SatelliteDetail> {
+  const res = await apiClient.post<SatelliteDetail>('/satellites', input)
+  return res.data
+}
+
+export async function deleteSatellite(id: string): Promise<void> {
+  await apiClient.delete(`/satellites/${id}`)
+}
+
+export async function uploadTLE(satelliteId: string, tle1: string, tle2: string): Promise<TLEData> {
+  const res = await apiClient.post<TLEData>(`/satellites/${satelliteId}/tle`, {
+    tle_line1: tle1,
+    tle_line2: tle2,
+  })
+  return res.data
+}

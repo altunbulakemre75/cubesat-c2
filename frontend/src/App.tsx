@@ -7,6 +7,7 @@ import { SatelliteDetail } from './pages/SatelliteDetail'
 import { CommandCenter } from './pages/CommandCenter'
 import { PassSchedule } from './pages/PassSchedule'
 import { Login } from './pages/Login'
+import { UserManagement } from './pages/UserManagement'
 import { useAppStore } from './store'
 
 const queryClient = new QueryClient({
@@ -82,6 +83,7 @@ export function App() {
               <Route path="satellites/:id" element={<SatelliteDetail />} />
               <Route path="commands" element={<CommandCenter />} />
               <Route path="passes" element={<PassSchedule />} />
+              <Route path="users" element={<UserManagement />} />
             </Route>
           </Routes>
         </BrowserRouter>

@@ -18,6 +18,13 @@ class TLECreate(BaseModel):
     epoch: datetime | None = None  # auto-parsed from TLE if omitted
 
 
+class SatelliteCreate(BaseModel):
+    id: str
+    name: str | None = None
+    norad_id: int | None = None
+    description: str | None = None
+
+
 # ── List / Detail ─────────────────────────────────────────────────────────────
 
 @router.get("", response_model=list[SatelliteListItem])
@@ -39,6 +46,49 @@ async def list_satellites(pool: Pool, user: CurrentUser):
             battery_voltage_v=last.get("battery_voltage_v") if last else None,
         ))
     return result
+
+
+@router.post("", response_model=SatelliteDetail, status_code=status.HTTP_201_CREATED)
+async def create_satellite(body: SatelliteCreate, pool: Pool, user: CurrentUser):
+    require_role(Role.OPERATOR, user["role"])
+    async with pool.acquire() as conn:
+        try:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO satellites (id, name, norad_id, description)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id, name, norad_id, description, active, created_at
+                """,
+                body.id, body.name or body.id, body.norad_id, body.description or "",
+            )
+        except Exception as exc:
+            if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
+                raise HTTPException(status.HTTP_409_CONFLICT,
+                                    detail=f"Satellite '{body.id}' already exists")
+            raise
+
+    return SatelliteDetail(
+        id=row["id"],
+        name=row["name"],
+        norad_id=row["norad_id"],
+        description=row["description"] or "",
+        active=row["active"],
+        created_at=row["created_at"],
+        mode=None, last_seen=None, battery_voltage_v=None,
+    )
+
+
+@router.delete("/{satellite_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_satellite(satellite_id: str, pool: Pool, user: CurrentUser):
+    require_role(Role.ADMIN, user["role"])
+    async with pool.acquire() as conn:
+        # Hard delete — ON DELETE CASCADE removes TLE history and commands.
+        # Telemetry (hypertable) is deleted separately since there is no FK.
+        await conn.execute("DELETE FROM telemetry WHERE satellite_id = $1", satellite_id)
+        await conn.execute("DELETE FROM pass_schedule WHERE satellite_id = $1", satellite_id)
+        result = await conn.execute("DELETE FROM satellites WHERE id = $1", satellite_id)
+    if result == "DELETE 0":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Satellite '{satellite_id}' not found")
 
 
 @router.get("/{satellite_id}", response_model=SatelliteDetail)

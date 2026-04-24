@@ -1,9 +1,11 @@
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { fetchSatellites, fetchAllTLEs } from '../api/satellites'
+import { deleteSatellite, fetchAllTLEs, fetchSatellites } from '../api/satellites'
 import { SatelliteCard } from '../components/SatelliteCard'
 import { AlertBanner } from '../components/AlertBanner'
 import { CesiumGlobe } from '../components/CesiumGlobe'
+import { SatelliteAddModal } from '../components/SatelliteAddModal'
 import { useAppStore } from '../store'
 import type { AppEvent } from '../types'
 
@@ -39,9 +41,11 @@ function EventFeedItem({ event }: { event: AppEvent }) {
 
 export function Dashboard() {
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const activeSatelliteId = useAppStore((s) => s.activeSatelliteId)
   const setActiveSatelliteId = useAppStore((s) => s.setActiveSatelliteId)
   const events = useAppStore((s) => s.events)
+  const [addOpen, setAddOpen] = useState(false)
 
   const {
     data: satellites,
@@ -53,27 +57,43 @@ export function Dashboard() {
     refetchInterval: 30_000,
   })
 
-  // Fetch TLEs for all satellites (only those that have one will show on globe)
   const { data: tles = [] } = useQuery({
     queryKey: ['tles', satellites?.map(s => s.id)],
     queryFn: () => fetchAllTLEs((satellites ?? []).map(s => s.id)),
     enabled: (satellites?.length ?? 0) > 0,
-    refetchInterval: 300_000,   // re-check every 5 min
+    refetchInterval: 300_000,
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteSatellite(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['satellites'] })
+      qc.invalidateQueries({ queryKey: ['tles'] })
+    },
   })
 
   return (
     <div className="flex h-full">
       {/* Left panel: satellite list */}
       <div className="flex w-60 flex-shrink-0 flex-col border-r border-space-border bg-space-panel">
-        <div className="border-b border-space-border p-3">
-          <h2 className="font-mono text-xs font-semibold uppercase tracking-wider text-gray-400">
-            Satellites
-          </h2>
-          {satellites && (
-            <p className="font-mono text-xs text-gray-600">
-              {satellites.length} tracked
-            </p>
-          )}
+        <div className="flex items-center justify-between border-b border-space-border p-3">
+          <div>
+            <h2 className="font-mono text-xs font-semibold uppercase tracking-wider text-gray-400">
+              Satellites
+            </h2>
+            {satellites && (
+              <p className="font-mono text-xs text-gray-600">
+                {satellites.length} tracked
+              </p>
+            )}
+          </div>
+          <button
+            onClick={() => setAddOpen(true)}
+            className="rounded border border-space-accent bg-space-accent/10 px-2 py-1 font-mono text-xs text-space-accent hover:bg-space-accent hover:text-white"
+            title="Add satellite"
+          >
+            + Add
+          </button>
         </div>
 
         <div className="flex-1 space-y-2 overflow-y-auto p-3">
@@ -103,6 +123,7 @@ export function Dashboard() {
                 setActiveSatelliteId(sat.id)
                 navigate(`/satellites/${sat.id}`)
               }}
+              onDelete={() => deleteMutation.mutate(sat.id)}
             />
           ))}
 
@@ -154,6 +175,8 @@ export function Dashboard() {
           </div>
         </div>
       </div>
+
+      <SatelliteAddModal open={addOpen} onClose={() => setAddOpen(false)} />
     </div>
   )
 }

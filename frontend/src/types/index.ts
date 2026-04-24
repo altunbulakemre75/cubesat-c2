@@ -3,10 +3,10 @@ export type SatelliteMode = 'beacon' | 'deployment' | 'nominal' | 'science' | 's
 export interface SatelliteListItem {
   id: string
   name: string
-  mode: SatelliteMode
-  last_seen: string // ISO datetime
-  battery_voltage_v: number
-  norad_id?: number
+  mode: SatelliteMode | null
+  last_seen: string | null  // ISO datetime, null = no telemetry yet
+  battery_voltage_v: number | null
+  norad_id: number | null
 }
 
 export interface SatelliteDetail extends SatelliteListItem {

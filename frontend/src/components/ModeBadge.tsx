@@ -2,7 +2,7 @@ import { clsx } from 'clsx'
 import type { SatelliteMode } from '../types'
 
 interface ModeBadgeProps {
-  mode: SatelliteMode
+  mode: SatelliteMode | null
   size?: 'sm' | 'md'
 }
 
@@ -23,6 +23,20 @@ const MODE_DOT: Record<SatelliteMode, string> = {
 }
 
 export function ModeBadge({ mode, size = 'md' }: ModeBadgeProps) {
+  if (!mode) {
+    return (
+      <span
+        className={clsx(
+          'inline-flex items-center gap-1.5 rounded border border-gray-700 bg-gray-800 text-gray-500 font-mono font-semibold uppercase tracking-wider',
+          size === 'sm' ? 'px-1.5 py-0.5 text-xs' : 'px-2 py-1 text-xs',
+        )}
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-gray-600" />
+        unknown
+      </span>
+    )
+  }
+
   return (
     <span
       className={clsx(
