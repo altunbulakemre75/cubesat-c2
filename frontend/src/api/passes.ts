@@ -2,7 +2,9 @@ import { apiClient } from './client'
 import type { Pass, Anomaly } from '../types'
 
 export async function fetchPasses(satelliteId: string): Promise<Pass[]> {
-  const response = await apiClient.get<Pass[]>(`/satellites/${satelliteId}/passes`)
+  const response = await apiClient.get<Pass[]>('/passes', {
+    params: { satellite_id: satelliteId, limit: 100 },
+  })
   return response.data
 }
 
