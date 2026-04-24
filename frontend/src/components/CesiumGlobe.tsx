@@ -122,16 +122,17 @@ export function CesiumGlobe({ satellites, tles }: Props) {
         }
 
         // CallbackProperty — Cesium invokes this each render frame.
-        // No manual setValue / setInterval needed. Old positions are never
-        // retained, so we don't get a trail of stale dots.
-        // CallbackPositionProperty (Cesium 1.120+): position callback
-        // invoked every render frame — no trail of stale dots.
-        const positionCb = new Cesium.CallbackPositionProperty(() => {
+        // CallbackProperty for position — Cesium evaluates it every render
+        // frame, so no manual setValue / setInterval. Old positions are
+        // never retained, so we don't get a trail of stale dots.
+        // (CallbackPositionProperty needs Cesium 1.123+; CallbackProperty
+        //  works on every version and is interchangeable here.)
+        const positionCb = new Cesium.CallbackProperty(() => {
           const t = new Date()
           const pv = propagate(satrec, t)
           if (!pv.position || typeof pv.position === 'boolean') return undefined
           return eciToCartesian(pv.position as { x: number; y: number; z: number }, gstime(t))
-        }, false)
+        }, false) as unknown as import('cesium').PositionProperty
 
         viewer.entities.add({
           id: tle.satellite_id,
