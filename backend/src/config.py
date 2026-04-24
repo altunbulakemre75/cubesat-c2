@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
 
+    # SatNOGS (optional — public endpoints work without token)
+    satnogs_api_token: str | None = None
+
     # App
     debug: bool = False
     log_level: str = "INFO"

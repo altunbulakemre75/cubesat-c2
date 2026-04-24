@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from src.api.routes import anomalies, auth, commands, passes, satellites, stations, telemetry
+from src.api.routes import anomalies, auth, commands, passes, satnogs, satellites, stations, telemetry
 from src.api.ws import router as ws_router
 from src.config import settings
 from src.ingestion.service import IngestionService, ensure_stream
@@ -51,6 +51,7 @@ def create_app() -> FastAPI:
     app.include_router(commands.router)
     app.include_router(passes.router)
     app.include_router(stations.router)
+    app.include_router(satnogs.router)
     app.include_router(anomalies.router)
     app.include_router(ws_router)
 
