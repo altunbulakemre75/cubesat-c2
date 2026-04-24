@@ -43,7 +43,10 @@ class TelemetryWriter:
             manual_ack=True,
         )
         logger.info("Telemetry writer listening on %s", _CANONICAL_SUBJECT)
-        await asyncio.Event().wait()
+        try:
+            await asyncio.sleep(float("inf"))
+        except asyncio.CancelledError:
+            pass
 
     async def _handle(self, msg: Msg) -> None:
         try:

@@ -76,7 +76,10 @@ class IngestionService:
             self._adapter.source_name,
             _RAW_SUBJECT,
         )
-        await asyncio.Event().wait()
+        try:
+            await asyncio.sleep(float("inf"))
+        except asyncio.CancelledError:
+            pass
 
     async def _handle(self, msg: Msg) -> None:
         try:
