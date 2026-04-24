@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Cesium container baseline */
+.cesium-widget,
+.cesium-widget canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Hide Cesium attribution in dev (keep for production!) */
+.cesium-credit-container {
+  display: none;
+}
+
+/* Custom scrollbar for space theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a0e1a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1f2937;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #374151;
+}
+
+/* Prevent body scroll bleed */
+body {
+  overflow: hidden;
+  background-color: #0a0e1a;
+}

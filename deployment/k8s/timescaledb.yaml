@@ -1,0 +1,116 @@
+---
+# PersistentVolumeClaim for TimescaleDB data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: timescaledb-pvc
+  namespace: cubesat-c2
+  labels:
+    app.kubernetes.io/name: cubesat-c2
+    app.kubernetes.io/component: timescaledb
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+# StatefulSet for TimescaleDB
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: timescaledb
+  namespace: cubesat-c2
+  labels:
+    app.kubernetes.io/name: cubesat-c2
+    app.kubernetes.io/component: timescaledb
+spec:
+  serviceName: timescaledb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: timescaledb
+  template:
+    metadata:
+      labels:
+        app: timescaledb
+        app.kubernetes.io/name: cubesat-c2
+        app.kubernetes.io/component: timescaledb
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: timescaledb
+          image: timescale/timescaledb:latest-pg16
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: cubesat-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cubesat-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: cubesat-config
+                  key: POSTGRES_DB
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U $POSTGRES_USER
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U $POSTGRES_USER
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: timescaledb-pvc
+
+---
+# Service for TimescaleDB
+apiVersion: v1
+kind: Service
+metadata:
+  name: timescaledb
+  namespace: cubesat-c2
+  labels:
+    app.kubernetes.io/name: cubesat-c2
+    app.kubernetes.io/component: timescaledb
+spec:
+  selector:
+    app: timescaledb
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+  clusterIP: None   # Headless — StatefulSet DNS

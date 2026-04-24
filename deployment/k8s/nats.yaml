@@ -1,0 +1,81 @@
+---
+# Deployment for NATS JetStream
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nats
+  namespace: cubesat-c2
+  labels:
+    app.kubernetes.io/name: cubesat-c2
+    app.kubernetes.io/component: nats
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nats
+  template:
+    metadata:
+      labels:
+        app: nats
+        app.kubernetes.io/name: cubesat-c2
+        app.kubernetes.io/component: nats
+    spec:
+      containers:
+        - name: nats
+          image: nats:alpine
+          args: ["-js", "-sd", "/data", "-m", "8222"]
+          ports:
+            - containerPort: 4222
+              name: client
+            - containerPort: 8222
+              name: monitor
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8222
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8222
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: nats-data
+              mountPath: /data
+      volumes:
+        - name: nats-data
+          emptyDir: {}
+
+---
+# Service for NATS
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats
+  namespace: cubesat-c2
+  labels:
+    app.kubernetes.io/name: cubesat-c2
+    app.kubernetes.io/component: nats
+spec:
+  selector:
+    app: nats
+  ports:
+    - port: 4222
+      targetPort: 4222
+      name: client
+    - port: 8222
+      targetPort: 8222
+      name: monitor

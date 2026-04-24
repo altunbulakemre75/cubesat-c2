@@ -21,6 +21,8 @@ dependencies = [
     "skyfield>=1.49",
     "sgp4>=2.23",
     "httpx>=0.27.0",
+    "prometheus-fastapi-instrumentator>=6.1.0",
+    "websockets>=12.0",
 ]
 
 [project.optional-dependencies]

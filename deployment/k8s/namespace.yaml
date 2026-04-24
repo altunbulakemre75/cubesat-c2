@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cubesat-c2
+  labels:
+    app.kubernetes.io/name: cubesat-c2
+    app.kubernetes.io/managed-by: kubectl

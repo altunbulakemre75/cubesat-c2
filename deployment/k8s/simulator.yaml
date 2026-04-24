@@ -1,0 +1,65 @@
+---
+# Deployment for the satellite telemetry simulator (single replica)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simulator
+  namespace: cubesat-c2
+  labels:
+    app.kubernetes.io/name: cubesat-c2
+    app.kubernetes.io/component: simulator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: simulator
+  strategy:
+    # Recreate to avoid duplicate telemetry from two simulators during rollouts
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: simulator
+        app.kubernetes.io/name: cubesat-c2
+        app.kubernetes.io/component: simulator
+    spec:
+      containers:
+        - name: simulator
+          image: cubesat-c2/simulator:latest
+          imagePullPolicy: Always
+          env:
+            - name: SIM_NATS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: cubesat-config
+                  key: NATS_URL
+            - name: SIM_SATELLITES
+              valueFrom:
+                configMapKeyRef:
+                  name: cubesat-config
+                  key: SIM_SATELLITES
+            - name: SIM_INTERVAL_S
+              valueFrom:
+                configMapKeyRef:
+                  name: cubesat-config
+                  key: SIM_INTERVAL_S
+            - name: SIM_FAULT_PROBABILITY
+              valueFrom:
+                configMapKeyRef:
+                  name: cubesat-config
+                  key: SIM_FAULT_PROBABILITY
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          livenessProbe:
+            # Simulator is a long-running process — probe via exec after startup
+            exec:
+              command: ["python", "-c", "import sys; sys.exit(0)"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
