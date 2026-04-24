@@ -1,13 +1,13 @@
 import logging
 import secrets
 
-from pydantic import field_validator
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
-# Known-weak JWT secret values that must never be used (even in dev mode
-# they will be replaced by a generated ephemeral secret).
+# Known-weak JWT secret values that must never be used in production.
+# In DEBUG=true mode these are silently replaced with a generated random secret.
 _FORBIDDEN_JWT_SECRETS = frozenset({
     "",
     "secret",
@@ -51,24 +51,27 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: list[str] = ["http://localhost:3000"]
 
-    @field_validator("jwt_secret_key")
-    @classmethod
-    def _validate_jwt_secret(cls, v: str, info) -> str:
+    @model_validator(mode="after")
+    def _validate_jwt_secret(self) -> "Settings":
         """
-        Reject weak secrets. In DEBUG mode generate an ephemeral random
-        secret (tokens invalidate on restart); in production hard-fail.
+        Validate JWT secret AFTER all fields are populated so `self.debug` is
+        reliably available. A field_validator on jwt_secret_key alone can't see
+        `debug` because fields are validated in declaration order and debug
+        comes later.
         """
-        debug = bool(info.data.get("debug", False))
+        v = self.jwt_secret_key
 
         if v.strip().lower() in _FORBIDDEN_JWT_SECRETS:
-            if debug:
+            if self.debug:
                 generated = secrets.token_urlsafe(32)
                 logger.warning(
                     "DEV MODE: generated ephemeral JWT secret. "
                     "Tokens will invalidate on restart. "
                     "Set JWT_SECRET_KEY in .env for persistence."
                 )
-                return generated
+                # Replace in-place (model is mutable at this stage)
+                object.__setattr__(self, "jwt_secret_key", generated)
+                return self
             raise ValueError(
                 "JWT_SECRET_KEY must be set in production. "
                 'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
@@ -79,7 +82,7 @@ class Settings(BaseSettings):
                 f"JWT_SECRET_KEY must be at least 32 characters (got {len(v)})."
             )
 
-        return v
+        return self
 
     @property
     def asyncpg_dsn(self) -> str:
