@@ -1,11 +1,24 @@
-from fastapi import APIRouter, HTTPException, status
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from pydantic import BaseModel
 
 from src.api.deps import CurrentUser, Pool
+from src.api.rbac import Role, require_role
 from src.api.schemas import SatelliteDetail, SatelliteListItem, TLEResponse
+from src.orbit.passes import GroundStation, predict_passes
 from src.storage.redis_client import get_last_telemetry
 
 router = APIRouter(prefix="/satellites", tags=["satellites"])
 
+
+class TLECreate(BaseModel):
+    tle_line1: str
+    tle_line2: str
+    epoch: datetime | None = None  # auto-parsed from TLE if omitted
+
+
+# ── List / Detail ─────────────────────────────────────────────────────────────
 
 @router.get("", response_model=list[SatelliteListItem])
 async def list_satellites(pool: Pool, user: CurrentUser):
@@ -52,17 +65,119 @@ async def get_satellite(satellite_id: str, pool: Pool, user: CurrentUser):
     )
 
 
+# ── TLE ───────────────────────────────────────────────────────────────────────
+
 @router.get("/{satellite_id}/tle", response_model=TLEResponse)
 async def get_latest_tle(satellite_id: str, pool: Pool, user: CurrentUser):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            """
-            SELECT satellite_id, epoch, tle_line1, tle_line2
-            FROM tle_history WHERE satellite_id = $1
-            ORDER BY epoch DESC LIMIT 1
-            """,
+            "SELECT satellite_id, epoch, tle_line1, tle_line2 FROM tle_history "
+            "WHERE satellite_id = $1 ORDER BY epoch DESC LIMIT 1",
             satellite_id,
         )
     if not row:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No TLE found for this satellite")
     return TLEResponse(**dict(row))
+
+
+@router.post("/{satellite_id}/tle", response_model=TLEResponse, status_code=status.HTTP_201_CREATED)
+async def set_tle(
+    satellite_id: str,
+    body: TLECreate,
+    pool: Pool,
+    user: CurrentUser,
+    background_tasks: BackgroundTasks,
+):
+    require_role(Role.OPERATOR, user["role"])
+
+    # Auto-register satellite if it doesn't exist
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO satellites (id, name) VALUES ($1, $1) ON CONFLICT DO NOTHING",
+            satellite_id,
+        )
+
+    # Parse epoch from TLE line 1 if not provided
+    epoch = body.epoch or _parse_tle_epoch(body.tle_line1)
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO tle_history (satellite_id, epoch, tle_line1, tle_line2)
+            VALUES ($1,$2,$3,$4)
+            RETURNING satellite_id, epoch, tle_line1, tle_line2
+            """,
+            satellite_id, epoch, body.tle_line1.strip(), body.tle_line2.strip(),
+        )
+
+    # Compute passes in background so the response returns immediately
+    background_tasks.add_task(_compute_and_store_passes, pool, satellite_id, body.tle_line1.strip(), body.tle_line2.strip())
+
+    return TLEResponse(**dict(row))
+
+
+# ── Pass computation ──────────────────────────────────────────────────────────
+
+async def _compute_and_store_passes(pool, satellite_id: str, tle1: str, tle2: str) -> None:
+    """Compute 48-hour passes for all active stations and store in pass_schedule."""
+    async with pool.acquire() as conn:
+        station_rows = await conn.fetch(
+            "SELECT id, name, latitude_deg, longitude_deg, elevation_m, min_elevation_deg "
+            "FROM ground_stations WHERE active = TRUE"
+        )
+
+    if not station_rows:
+        return
+
+    now = datetime.now(timezone.utc)
+    all_passes = []
+    for sr in station_rows:
+        station = GroundStation(
+            id=sr["id"],
+            name=sr["name"],
+            lat_deg=sr["latitude_deg"],
+            lon_deg=sr["longitude_deg"],
+            elevation_m=sr["elevation_m"],
+            min_elevation_deg=sr["min_elevation_deg"],
+        )
+        try:
+            passes = predict_passes(satellite_id, tle1, tle2, station, start=now, horizon_hours=48)
+            all_passes.extend(passes)
+        except Exception:
+            continue
+
+    if not all_passes:
+        return
+
+    async with pool.acquire() as conn:
+        # Clear old passes for this satellite
+        await conn.execute("DELETE FROM pass_schedule WHERE satellite_id = $1", satellite_id)
+        # Insert new ones
+        await conn.executemany(
+            """
+            INSERT INTO pass_schedule (satellite_id, station_id, aos, los, max_elevation_deg, azimuth_at_aos_deg)
+            VALUES ($1,$2,$3,$4,$5,$6)
+            """,
+            [
+                (p.satellite_id, p.station.id, p.aos, p.los, p.max_elevation_deg, p.azimuth_at_aos_deg)
+                for p in all_passes
+            ],
+        )
+
+
+def _parse_tle_epoch(tle_line1: str) -> datetime:
+    """Parse epoch from TLE line 1 (columns 19-32: YYDDD.DDDDDDDD)."""
+    try:
+        epoch_str = tle_line1[18:32].strip()
+        year_2d = int(epoch_str[:2])
+        year = 2000 + year_2d if year_2d < 57 else 1900 + year_2d
+        day_of_year = float(epoch_str[2:])
+        import math
+        day = int(day_of_year)
+        frac = day_of_year - day
+        dt = datetime(year, 1, 1, tzinfo=timezone.utc)
+        from datetime import timedelta
+        dt += timedelta(days=day - 1) + timedelta(days=frac)
+        return dt
+    except Exception:
+        return datetime.now(timezone.utc)

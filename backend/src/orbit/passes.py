@@ -36,29 +36,30 @@ class PassWindow:
 
 def _elevation_deg(sat_lat: float, sat_lon: float, sat_alt_km: float,
                    gs_lat: float, gs_lon: float, gs_elev_m: float) -> float:
-    """Approximate elevation angle (degrees) from ground station to satellite."""
-    R_E = 6371.0  # km
-    gs_alt_km = gs_elev_m / 1000
+    """
+    Elevation angle (degrees) from ground station to satellite.
 
-    # Convert to radians
+    Formula: el = atan2(cos(ρ) - R_E/(R_E+h), sin(ρ))
+    where ρ is the great-circle angle between GS and the subsatellite point.
+    Returns negative values below the horizon.
+    """
+    R_E = 6371.0  # km
+
     φ1, λ1 = math.radians(gs_lat), math.radians(gs_lon)
     φ2, λ2 = math.radians(sat_lat), math.radians(sat_lon)
 
-    # Slant range vector in ECI-like approximation
     Δφ = φ2 - φ1
     Δλ = λ2 - λ1
     a = math.sin(Δφ / 2)**2 + math.cos(φ1) * math.cos(φ2) * math.sin(Δλ / 2)**2
-    central_angle = 2 * math.asin(math.sqrt(a))
+    rho = 2 * math.asin(math.sqrt(max(0.0, min(1.0, a))))  # central angle (radians)
 
-    # Law of cosines for elevation
-    d_km = math.sqrt(
-        (R_E + gs_alt_km)**2 + (R_E + sat_alt_km)**2
-        - 2 * (R_E + gs_alt_km) * (R_E + sat_alt_km) * math.cos(central_angle)
-    )
-    # Elevation angle
-    cos_elev = ((R_E + sat_alt_km)**2 - (R_E + gs_alt_km)**2 - d_km**2) / (2 * (R_E + gs_alt_km) * d_km)
-    cos_elev = max(-1.0, min(1.0, cos_elev))
-    return math.degrees(math.asin(math.sqrt(max(0, 1 - cos_elev**2))))
+    if rho < 1e-9:   # satellite directly overhead
+        return 90.0
+
+    # Include ground station altitude as a small correction to the Earth radius
+    r_gs = R_E + gs_elev_m / 1000.0
+    el_rad = math.atan2(math.cos(rho) - r_gs / (R_E + sat_alt_km), math.sin(rho))
+    return math.degrees(el_rad)
 
 
 def _azimuth_deg(sat_lat: float, sat_lon: float,
