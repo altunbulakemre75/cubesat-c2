@@ -1,12 +1,12 @@
 FROM python:3.11-slim
 WORKDIR /app
 
-# Install deps first (layer cache: only rebuild on pyproject.toml change)
+# curl needed for Docker health check
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml .
-# Create minimal src/ so hatchling can find the package
 RUN mkdir -p src && pip install --no-cache-dir -e ".[dev]"
 
-# Copy full source (this layer rebuilds on any source change)
 COPY . .
 
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
