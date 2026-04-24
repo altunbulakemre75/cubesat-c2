@@ -1,0 +1,30 @@
+# CubeSat C2 — Production overrides
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Differences from dev:
+#   - No volume mounts (code is baked into the image)
+#   - No --reload flag on uvicorn
+#   - Observability stack included by default
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    volumes: []   # override dev volume mount — code lives in the image
+    environment:
+      - DEBUG=false
+      - LOG_LEVEL=WARNING
+    command: ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+
+  simulator:
+    build:
+      context: ./simulator
+      dockerfile: Dockerfile
+    volumes: []
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    volumes: []

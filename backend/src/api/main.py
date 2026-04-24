@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
 
 import nats
 from fastapi import FastAPI
@@ -26,6 +28,36 @@ logger = logging.getLogger(__name__)
 _background_tasks: list[asyncio.Task] = []
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    # ── startup ──────────────────────────────────────────────────────────────
+    pool = await get_pool()
+    await run_migrations(pool)
+
+    nc = await nats.connect(settings.nats_url)
+    js = nc.jetstream()
+
+    await ensure_stream(js)
+
+    ingestion = IngestionService(js, protocol="ax25")
+    _background_tasks.append(asyncio.create_task(ingestion.run(), name="ingestion"))
+
+    writer = TelemetryWriter(js, pool)
+    _background_tasks.append(asyncio.create_task(writer.run(), name="writer"))
+
+    logger.info("CubeSat C2 API started — ingestion and writer running")
+
+    yield
+
+    # ── shutdown ─────────────────────────────────────────────────────────────
+    for task in _background_tasks:
+        task.cancel()
+    await asyncio.gather(*_background_tasks, return_exceptions=True)
+    await nc.close()
+    await close_pool()
+    await close_client()
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="CubeSat C2",
@@ -33,6 +65,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         docs_url="/docs",
         redoc_url="/redoc",
+        lifespan=lifespan,
     )
 
     app.add_middleware(
@@ -54,39 +87,6 @@ def create_app() -> FastAPI:
     app.include_router(satnogs.router)
     app.include_router(anomalies.router)
     app.include_router(ws_router)
-
-    @app.on_event("startup")
-    async def startup() -> None:
-        pool = await get_pool()
-        await run_migrations(pool)
-
-        nc = await nats.connect(settings.nats_url)
-        js = nc.jetstream()
-
-        # Create NATS stream so simulator can publish immediately
-        await ensure_stream(js)
-
-        # Ingestion: raw → canonical
-        ingestion = IngestionService(js, protocol="ax25")
-        _background_tasks.append(
-            asyncio.create_task(ingestion.run(), name="ingestion")
-        )
-
-        # Writer: canonical → TimescaleDB + Redis
-        writer = TelemetryWriter(js, pool)
-        _background_tasks.append(
-            asyncio.create_task(writer.run(), name="writer")
-        )
-
-        logger.info("CubeSat C2 API started — ingestion and writer running")
-
-    @app.on_event("shutdown")
-    async def shutdown() -> None:
-        for task in _background_tasks:
-            task.cancel()
-        await asyncio.gather(*_background_tasks, return_exceptions=True)
-        await close_pool()
-        await close_client()
 
     @app.get("/health", tags=["system"])
     async def health() -> dict:

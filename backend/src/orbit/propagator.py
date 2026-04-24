@@ -1,6 +1,18 @@
 """
 SGP4-based orbit propagator using the sgp4 library.
 Returns satellite position as (lat_deg, lon_deg, alt_km) at a given UTC datetime.
+
+Note: the ECI→geodetic conversion below is manual (WGS-84 iterative).
+A simpler alternative for future refactor:
+
+    from skyfield.api import wgs84, EarthSatellite, load
+    ts = load.timescale()
+    sat = EarthSatellite(tle_line1, tle_line2, ts=ts)
+    geo = wgs84.subpoint_of(sat.at(ts.from_datetime(t)))
+    lat, lon, alt = geo.latitude.degrees, geo.longitude.degrees, geo.elevation.km
+
+Kept as-is because it works correctly and has no additional dependency on
+skyfield's data files (which require internet access on first load).
 """
 
 from __future__ import annotations

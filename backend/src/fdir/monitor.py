@@ -104,6 +104,12 @@ class FDIRMonitor:
             logger.info("FDIR | sat=%s recovered", satellite_id)
 
     async def _trigger_safe_mode(self, satellite_id: str, reason: str) -> None:
+        # Design note: FDIR publishes an alert event to NATS (events.fdir.*) but does NOT
+        # automatically send a safe mode command to the satellite. This is intentional —
+        # the actual mode_change command requires operator approval via POST /commands.
+        # Rationale: autonomous safe mode commanding over a lossy RF link could cause
+        # unrecoverable states if the trigger was a false positive (e.g. stale telemetry
+        # due to LOS rather than a real fault).
         import json
         payload = {
             "satellite_id": satellite_id,
