@@ -8,13 +8,14 @@ Raises warning at 2σ, critical at 3σ.
 from __future__ import annotations
 
 import math
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 WINDOW_SIZE = 60          # number of recent values per parameter
 WARNING_THRESHOLD = 2.0   # z-score for warning
 CRITICAL_THRESHOLD = 3.0  # z-score for critical
+MAX_TRACKED_KEYS = 1000   # LRU cap: max (satellite, parameter) pairs tracked
 
 
 @dataclass
@@ -34,17 +35,27 @@ class ParameterStats:
         self._window: deque[float] = deque(maxlen=maxlen)
 
     def push(self, value: float) -> float | None:
-        """Add a value. Returns z-score if enough data, else None."""
+        """
+        Add a value. Returns z-score if enough data, else None.
+
+        When actual std is below the min_std floor (baseline has no noise),
+        the returned z-score is capped so a single modest deviation doesn't
+        spike to "critical" just because we divided by the synthetic floor.
+        """
         if len(self._window) >= 2:
             mean = sum(self._window) / len(self._window)
             variance = sum((x - mean) ** 2 for x in self._window) / len(self._window)
             std = math.sqrt(variance)
-            # Minimum std floor: 1% of |mean| or 0.001 (whichever is larger).
-            # Prevents false positives from near-zero variance AND ensures
-            # extreme outliers are detected even when baseline has no noise.
+            # Floor prevents /0 on perfectly constant baselines. We scale it
+            # with |mean| to be units-aware (1% of the nominal value).
             min_std = max(0.001, 0.01 * abs(mean)) if mean != 0 else 0.001
             effective_std = max(std, min_std)
             z = abs(value - mean) / effective_std
+            # If the baseline was nearly constant (actual std << floor), we
+            # don't yet trust the variance estimate. Cap z below the critical
+            # threshold so the detector waits for real noise to accumulate.
+            if std < min_std * 0.5:
+                z = min(z, CRITICAL_THRESHOLD - 0.01)
         else:
             z = None
         self._window.append(value)
@@ -70,8 +81,9 @@ class AnomalyDetector:
     )
 
     def __init__(self) -> None:
-        # key: (satellite_id, parameter)
-        self._stats: dict[tuple[str, str], ParameterStats] = {}
+        # LRU-ordered dict so oldest-seen keys drop when MAX_TRACKED_KEYS exceeded.
+        # key: (satellite_id, parameter) → ParameterStats
+        self._stats: OrderedDict[tuple[str, str], ParameterStats] = OrderedDict()
 
     def feed(self, satellite_id: str, params: dict[str, float]) -> list[AnomalyEvent]:
         """
@@ -86,8 +98,13 @@ class AnomalyDetector:
                 continue
 
             key = (satellite_id, param)
-            if key not in self._stats:
+            if key in self._stats:
+                self._stats.move_to_end(key)  # bump freshness
+            else:
                 self._stats[key] = ParameterStats()
+                # Evict oldest entries when over the cap
+                while len(self._stats) > MAX_TRACKED_KEYS:
+                    self._stats.popitem(last=False)
 
             stats = self._stats[key]
             z = stats.push(value)

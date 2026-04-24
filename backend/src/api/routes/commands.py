@@ -2,6 +2,7 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, Query, status
 
+from src.api.audit import log_action
 from src.api.deps import CurrentUser, Pool
 from src.api.rbac import Role, require_role
 from src.api.schemas import CommandCreate, CommandOut
@@ -44,6 +45,11 @@ async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser):
             user["username"], body.scheduled_at,
         )
 
+    await log_action(
+        pool, user["username"], "command.create",
+        target_id=cmd_id, target_type="command",
+        details={"satellite_id": body.satellite_id, "command_type": body.command_type},
+    )
     return _row_to_command(row)
 
 
@@ -89,6 +95,11 @@ async def cancel_command(command_id: str, pool: Pool, user: CurrentUser):
         )
     if result == "UPDATE 0":
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Command not found or not cancellable")
+
+    await log_action(
+        pool, user["username"], "command.cancel",
+        target_id=command_id, target_type="command",
+    )
 
 
 def _row_to_command(row) -> CommandOut:

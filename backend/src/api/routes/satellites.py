@@ -1,6 +1,9 @@
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 from sgp4.api import Satrec, WGS84
 
@@ -224,41 +227,59 @@ async def _compute_and_store_passes(pool, satellite_id: str, tle1: str, tle2: st
         try:
             passes = predict_passes(satellite_id, tle1, tle2, station, start=now, horizon_hours=48)
             all_passes.extend(passes)
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Pass prediction failed | sat=%s station=%s: %s",
+                satellite_id, station.name, exc,
+                exc_info=True,
+            )
             continue
 
-    if not all_passes:
-        return
-
     async with pool.acquire() as conn:
-        # Clear old passes for this satellite
-        await conn.execute("DELETE FROM pass_schedule WHERE satellite_id = $1", satellite_id)
-        # Insert new ones
-        await conn.executemany(
-            """
-            INSERT INTO pass_schedule (satellite_id, station_id, aos, los, max_elevation_deg, azimuth_at_aos_deg)
-            VALUES ($1,$2,$3,$4,$5,$6)
-            """,
-            [
-                (p.satellite_id, p.station.id, p.aos, p.los, p.max_elevation_deg, p.azimuth_at_aos_deg)
-                for p in all_passes
-            ],
-        )
+        # Atomic: always DELETE old passes first (so stale predictions don't
+        # survive a TLE update that produces zero passes), then INSERT new
+        # ones. Both in one transaction for rollback safety.
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM pass_schedule WHERE satellite_id = $1", satellite_id
+            )
+            if not all_passes:
+                return
+            await conn.executemany(
+                """
+                INSERT INTO pass_schedule
+                  (satellite_id, station_id, aos, los, max_elevation_deg, azimuth_at_aos_deg)
+                VALUES ($1,$2,$3,$4,$5,$6)
+                """,
+                [
+                    (p.satellite_id, p.station.id, p.aos, p.los,
+                     p.max_elevation_deg, p.azimuth_at_aos_deg)
+                    for p in all_passes
+                ],
+            )
 
 
 def _parse_tle_epoch(tle_line1: str) -> datetime:
-    """Parse epoch from TLE line 1 (columns 19-32: YYDDD.DDDDDDDD)."""
+    """
+    Parse epoch from TLE line 1 (columns 19-32: YYDDD.DDDDDDDD).
+    Raises ValueError on malformed input — callers should map to HTTP 422.
+    """
+    from datetime import timedelta
+
+    if len(tle_line1) < 32:
+        raise ValueError(f"TLE line 1 too short to contain epoch (got {len(tle_line1)} chars)")
+
     try:
         epoch_str = tle_line1[18:32].strip()
         year_2d = int(epoch_str[:2])
         year = 2000 + year_2d if year_2d < 57 else 1900 + year_2d
         day_of_year = float(epoch_str[2:])
-        import math
-        day = int(day_of_year)
-        frac = day_of_year - day
-        dt = datetime(year, 1, 1, tzinfo=timezone.utc)
-        from datetime import timedelta
-        dt += timedelta(days=day - 1) + timedelta(days=frac)
-        return dt
-    except Exception:
-        return datetime.now(timezone.utc)
+    except (ValueError, IndexError) as exc:
+        raise ValueError(f"Malformed TLE epoch field '{tle_line1[18:32]}': {exc}") from exc
+
+    if not (1 <= day_of_year < 367):
+        raise ValueError(f"TLE day-of-year out of range: {day_of_year}")
+
+    day = int(day_of_year)
+    frac = day_of_year - day
+    return datetime(year, 1, 1, tzinfo=timezone.utc) + timedelta(days=day - 1, seconds=frac * 86400)

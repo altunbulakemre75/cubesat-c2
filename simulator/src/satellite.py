@@ -61,9 +61,15 @@ class CubeSat:
         fault_probability: float = 0.001,
         safe_recovery_s: float = 120.0,
     ) -> None:
+        if not 0.0 <= fault_probability <= 1.0:
+            raise ValueError(
+                f"fault_probability must be in [0, 1] (got {fault_probability})"
+            )
         self.satellite_id = satellite_id
         self.fault_probability = fault_probability
-        self.safe_recovery_s = safe_recovery_s
+        # Enforce a 1-second minimum to prevent SAFE/NOMINAL oscillation
+        # under fault_probability=1.0
+        self.safe_recovery_s = max(1.0, safe_recovery_s)
 
         self._mode = SatelliteMode.BEACON
         self._mode_entered_at = time.monotonic()

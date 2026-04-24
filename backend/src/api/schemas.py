@@ -67,12 +67,12 @@ class TelemetryPoint(BaseModel):
 # ── Commands ──────────────────────────────────────────────────────────────────
 
 class CommandCreate(BaseModel):
-    satellite_id: str
-    command_type: str
+    satellite_id: str = Field(..., min_length=1, max_length=64)
+    command_type: str = Field(..., min_length=1, max_length=64, pattern=r"^\S.*\S$|^\S$")
     params: dict[str, Any] = Field(default_factory=dict)
     priority: int = Field(default=5, ge=1, le=10)
     safe_retry: bool = False
-    idempotency_key: str | None = None
+    idempotency_key: str | None = Field(default=None, max_length=128)
     scheduled_at: datetime | None = None
 
 

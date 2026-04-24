@@ -26,6 +26,10 @@ class UserOut(BaseModel):
     active: bool
 
 
+class RoleChange(BaseModel):
+    role: str
+
+
 @router.get("", response_model=list[UserOut])
 async def list_users(pool: Pool, user: CurrentUser):
     require_role(Role.ADMIN, user["role"])
@@ -78,8 +82,9 @@ async def create_user(body: UserCreate, pool: Pool, user: CurrentUser):
 
 
 @router.patch("/{username}/role")
-async def change_role(username: str, role: str, pool: Pool, user: CurrentUser):
+async def change_role(username: str, body: RoleChange, pool: Pool, user: CurrentUser):
     require_role(Role.ADMIN, user["role"])
+    role = body.role
 
     if role not in ("viewer", "operator", "admin"):
         raise HTTPException(

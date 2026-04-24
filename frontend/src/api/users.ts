@@ -26,5 +26,5 @@ export async function createUser(input: CreateUserInput): Promise<User> {
 }
 
 export async function changeUserRole(username: string, role: User['role']): Promise<void> {
-  await apiClient.patch(`/users/${username}/role`, null, { params: { role } })
+  await apiClient.patch(`/users/${username}/role`, { role })
 }
