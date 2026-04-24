@@ -65,9 +65,10 @@ class IngestionService:
     async def run(self) -> None:
         await ensure_stream(self._js)
 
-        sub = await self._js.subscribe(
+        await self._js.subscribe(
             _RAW_SUBJECT,
             durable=_DURABLE_NAME,
+            cb=self._handle,
             manual_ack=True,
         )
         logger.info(
@@ -75,12 +76,6 @@ class IngestionService:
             self._adapter.source_name,
             _RAW_SUBJECT,
         )
-
-        async def _dispatch(msg: Msg) -> None:
-            await self._handle(msg)
-
-        # nats-py push subscription delivers via callback; block here
-        sub.set_handler(_dispatch)  # type: ignore[attr-defined]
         await asyncio.Event().wait()
 
     async def _handle(self, msg: Msg) -> None:

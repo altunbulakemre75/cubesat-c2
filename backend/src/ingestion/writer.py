@@ -36,17 +36,13 @@ class TelemetryWriter:
         return {"written": self._written, "errors": self._errors}
 
     async def run(self) -> None:
-        sub = await self._js.subscribe(
+        await self._js.subscribe(
             _CANONICAL_SUBJECT,
             durable=_DURABLE_NAME,
+            cb=self._handle,
             manual_ack=True,
         )
         logger.info("Telemetry writer listening on %s", _CANONICAL_SUBJECT)
-
-        async def _dispatch(msg: Msg) -> None:
-            await self._handle(msg)
-
-        sub.set_handler(_dispatch)  # type: ignore[attr-defined]
         await asyncio.Event().wait()
 
     async def _handle(self, msg: Msg) -> None:

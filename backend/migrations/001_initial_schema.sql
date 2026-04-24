@@ -170,6 +170,6 @@ INSERT INTO users (username, email, password_hash, role)
 VALUES (
     'admin',
     'admin@cubesat-c2.local',
-    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQyCjb7P.8rsMGwVSAC/KVZK2',
+    '$2b$12$yiDr9tvZD6xHMEIWGb1nNuHx8UNiGHcU9Cl9niknu8/m4gGltS9Ry',
     'admin'
 ) ON CONFLICT DO NOTHING;
