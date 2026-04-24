@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org)
-[![Tests](https://img.shields.io/badge/tests-80%20passing-brightgreen.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-88%20passing-brightgreen.svg)](#tests)
 [![Status](https://img.shields.io/badge/status-beta-orange.svg)](#status)
 
 A full-stack mission control system for CubeSats and small satellites. Paste a TLE, start Docker, and watch your satellite fly across a real-time 3D globe with pass predictions, command dispatch, and automatic fault detection.
@@ -69,7 +69,17 @@ The existing options are all painful:
 
 ## Screenshots
 
-> *(Add screenshots here after first public deploy — suggested: dashboard with ISS + 2 satellites, satellite detail with live charts, pass schedule Gantt)*
+### Dashboard — live 3D tracking
+![Dashboard with ISS on Cesium globe](docs/screenshots/01-dashboard.png)
+
+### Satellite detail — real-time telemetry
+![Live battery, temperature, solar charts](docs/screenshots/02-satellite-detail.png)
+
+### Command center — policy-gated dispatch
+![Command modal with SAFE mode restrictions](docs/screenshots/03-command-center.png)
+
+### Pass schedule — 24h Gantt across ground stations
+![Gantt-style pass timeline](docs/screenshots/04-pass-schedule.png)
 
 ---
 
@@ -177,7 +187,7 @@ Full diagram with sub-system breakdowns: [docs/MIMARI.md](docs/MIMARI.md)
 
 ## Tests
 
-80 tests passing — run locally:
+88 tests passing — run locally:
 
 ```bash
 cd backend && pytest tests/ -v
