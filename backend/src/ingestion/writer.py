@@ -233,14 +233,22 @@ class TelemetryWriter:
                                ev.satellite_id, ev.parameter, exc)
 
             try:
+                import uuid
+                ts = ev.detected_at.isoformat()
+                # Shape matches frontend AppEvent: id, type, message, timestamp.
                 payload = json.dumps({
+                    "id": str(uuid.uuid4()),
                     "type": "anomaly",
                     "satellite_id": ev.satellite_id,
+                    "message": (
+                        f"{ev.parameter}={ev.value:.3f} z={ev.z_score:.2f} ({ev.severity})"
+                    ),
+                    "timestamp": ts,
+                    "severity": ev.severity,
                     "parameter": ev.parameter,
                     "value": ev.value,
                     "z_score": ev.z_score,
-                    "severity": ev.severity,
-                    "detected_at": ev.detected_at.isoformat(),
+                    "detected_at": ts,
                 }).encode()
                 await self._js.publish(f"events.anomaly.{ev.satellite_id}", payload)
             except Exception as exc:  # noqa: BLE001

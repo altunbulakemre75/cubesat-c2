@@ -143,10 +143,20 @@ class FDIRMonitor:
         # unrecoverable states if the trigger was a false positive (e.g. stale telemetry
         # due to LOS rather than a real fault).
         import json
+        import uuid
+        now = datetime.now(timezone.utc).isoformat()
+        # Shape matches frontend AppEvent: id, type, satellite_id, message,
+        # timestamp, severity. Anything beyond that is ignored by the UI but
+        # kept for log/debug consumers.
         payload = {
+            "id": str(uuid.uuid4()),
+            "type": "fdir_alert",
             "satellite_id": satellite_id,
+            "message": f"FDIR alert: {reason}",
+            "timestamp": now,
+            "severity": "critical",
             "reason": reason,
-            "triggered_at": datetime.now(timezone.utc).isoformat(),
+            "triggered_at": now,
         }
         subject = f"events.fdir.{satellite_id}"
         try:

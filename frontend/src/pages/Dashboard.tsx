@@ -26,15 +26,21 @@ function EventFeedItem({ event }: { event: AppEvent }) {
     info: 'text-gray-400',
   }
 
+  // Defensive: a malformed payload (older publisher, future event types)
+  // shouldn't crash the whole dashboard — fall back to 'info'.
+  const type = event.type ?? 'info'
+  const ts = event.timestamp
   return (
     <div className="border-b border-space-border py-2 last:border-0">
       <div className="flex items-start gap-2">
-        <span className={`font-mono text-xs font-semibold ${colorMap[event.type] ?? 'text-gray-400'}`}>
-          [{event.type.toUpperCase().replace('_', ' ')}]
+        <span className={`font-mono text-xs font-semibold ${colorMap[type] ?? 'text-gray-400'}`}>
+          [{type.toUpperCase().replace('_', ' ')}]
         </span>
       </div>
-      <p className="font-mono text-xs text-gray-300">{event.message}</p>
-      <p className="font-mono text-xs text-gray-600">{formatEventTime(event.timestamp)}</p>
+      <p className="font-mono text-xs text-gray-300">{event.message ?? '(no message)'}</p>
+      {ts ? (
+        <p className="font-mono text-xs text-gray-600">{formatEventTime(ts)}</p>
+      ) : null}
     </div>
   )
 }
