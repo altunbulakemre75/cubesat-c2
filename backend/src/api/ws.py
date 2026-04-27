@@ -19,6 +19,7 @@ import logging
 
 import nats
 from nats.aio.client import Client as NATSClient
+from nats.js.api import ConsumerConfig, DeliverPolicy
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 from jose import JWTError
 
@@ -151,7 +152,13 @@ async def ws_events(
     try:
         nc = await _get_shared_nats()
         js = nc.jetstream()
-        sub = await js.subscribe("events.>")
+        # Only deliver events that arrive AFTER this WS connects. Default
+        # DeliverAll replays the entire stream on every reconnect, which on
+        # a flaky network produces piles of duplicate alerts on the client.
+        sub = await js.subscribe(
+            "events.>",
+            config=ConsumerConfig(deliver_policy=DeliverPolicy.NEW),
+        )
         logger.info("WS events | user=%s", user["username"])
 
         async for msg in sub.messages:

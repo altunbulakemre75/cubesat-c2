@@ -53,6 +53,11 @@ export const useAppStore = create<AppState>((set) => ({
   events: [],
   pushEvent: (event) =>
     set((state) => {
+      // Defensive dedupe by id — protects against WS reconnect replays or
+      // any future publisher that emits the same event twice.
+      if (event.id && state.events.some((e) => e.id === event.id)) {
+        return state
+      }
       const events = [event, ...state.events].slice(0, MAX_EVENTS)
       const activeAlerts =
         event.severity === 'warning' || event.severity === 'critical'
