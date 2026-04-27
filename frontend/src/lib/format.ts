@@ -20,11 +20,12 @@ export function formatRelativeTime(iso: string | null | undefined): string {
   return `${Math.floor(diffHr / 24)}d ago`
 }
 
-/** Wall-clock HH:MM:SS in user's local timezone. */
+/** Wall-clock HH:MM:SS in user's local timezone (always 24h). */
 export function formatClockTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
+    hour12: false,
   })
 }

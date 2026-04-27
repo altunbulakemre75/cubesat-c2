@@ -1,4 +1,13 @@
 apiVersion: 1
+
+# Reset stale entries from earlier deploys; prevents
+# "data source not found" provisioning errors when uids drift.
+deleteDatasources:
+  - name: Prometheus
+    orgId: 1
+  - name: Loki
+    orgId: 1
+
 datasources:
   - name: Prometheus
     type: prometheus
@@ -6,12 +15,12 @@ datasources:
     url: http://prometheus:9090
     isDefault: true
     access: proxy
-    editable: false
+    editable: true
   - name: Loki
     type: loki
     uid: loki
     url: http://loki:3100
     access: proxy
-    editable: false
+    editable: true
     jsonData:
       maxLines: 1000

@@ -27,7 +27,7 @@ _STREAM_SUBJECTS = [
     "telemetry.raw.*",
     "telemetry.canonical.*",
     "commands.*",
-    "events.*",
+    "events.>",  # NATS '*' is single-token; use '>' so events.anomaly.<sat> matches
 ]
 _RAW_SUBJECT = "telemetry.raw.*"
 _CANONICAL_PREFIX = "telemetry.canonical"
@@ -35,13 +35,25 @@ _DURABLE_NAME = "ingestion"
 
 
 async def ensure_stream(js: JetStreamContext) -> None:
-    """Create the cubesat JetStream stream if it doesn't already exist."""
+    """Create or update the cubesat JetStream stream so it always carries the
+    full subject list. If subjects drift over deploys (e.g. a new events.*
+    pattern is added), update the existing stream rather than silently
+    publishing into the void."""
     try:
-        await js.stream_info(_STREAM_NAME)
-        logger.debug("NATS stream '%s' already exists", _STREAM_NAME)
+        info = await js.stream_info(_STREAM_NAME)
+        existing = set(info.config.subjects or [])
+        wanted = set(_STREAM_SUBJECTS)
+        if existing != wanted:
+            await js.update_stream(name=_STREAM_NAME, subjects=_STREAM_SUBJECTS)
+            logger.info("Updated NATS stream '%s' subjects: %s -> %s",
+                        _STREAM_NAME, sorted(existing), sorted(wanted))
+        else:
+            logger.debug("NATS stream '%s' already exists with correct subjects",
+                         _STREAM_NAME)
     except nats.js.errors.NotFoundError:
         await js.add_stream(name=_STREAM_NAME, subjects=_STREAM_SUBJECTS)
-        logger.info("Created NATS stream '%s' with subjects: %s", _STREAM_NAME, _STREAM_SUBJECTS)
+        logger.info("Created NATS stream '%s' with subjects: %s",
+                    _STREAM_NAME, _STREAM_SUBJECTS)
 
 
 class IngestionService:
