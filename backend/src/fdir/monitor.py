@@ -92,6 +92,13 @@ class FDIRMonitor:
         state = self._states[satellite_id]
         warnings: list[str] = []
 
+        # Defensive: Redis decoded value should be a dict; if it's anything
+        # else (cache corruption, wrong serializer in a sibling service),
+        # surface a warning instead of crashing.
+        if last is not None and not isinstance(last, dict):
+            warnings.append(f"Cached telemetry has wrong type: {type(last).__name__}")
+            last = None
+
         if last is None:
             warnings.append("No telemetry received since startup")
         else:

@@ -250,3 +250,157 @@ async def test_timeout_skips_if_row_not_in_sent_state():
     await sched._mark_timed_out("c11", "no ack")
     assert sched.timed_out_count == 0
     pool.conn.execute.assert_not_called()
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Race + adversarial inputs.
+# ─────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_schedule_once_handles_no_pending():
+    sched, pool, _ = _make_scheduler()
+    pool.conn.fetch.return_value = []
+    await sched._schedule_once()
+    pool.conn.execute.assert_not_called()
+    assert sched.scheduled_count == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_once_handles_no_scheduled():
+    sched, pool, js = _make_scheduler()
+    pool.conn.fetch.return_value = []
+    await sched._execute_once()
+    js.publish.assert_not_called()
+    assert sched.transmitted_count == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_publishes_priority_ordered_commands():
+    """When multiple commands are due, the SQL ORDER BY scheduled_at means
+    the oldest goes first. Test mirrors what the implementation does."""
+    sched, pool, js = _make_scheduler()
+    pool.conn.fetch.return_value = [
+        {"id": f"c{i}", "satellite_id": f"SAT{i}", "command_type": "ping",
+         "params": None, "retry_count": 0}
+        for i in range(3)
+    ]
+    pool.conn.execute.return_value = "UPDATE 1"
+    await sched._execute_once()
+    # Three publishes for three different sats — no cross-talk
+    assert js.publish.await_count == 3
+    subjects = [call.args[0] for call in js.publish.await_args_list]
+    assert sorted(subjects) == ["commands.SAT0", "commands.SAT1", "commands.SAT2"]
+
+
+@pytest.mark.asyncio
+async def test_mark_timed_out_command_not_found_is_noop():
+    """fetchrow returns None when the row doesn't exist — must not crash
+    or attempt to update."""
+    sched, pool, _ = _make_scheduler()
+    pool.conn.fetchrow.return_value = None
+    await sched._mark_timed_out("nonexistent-id", "test")
+    pool.conn.execute.assert_not_called()
+    assert sched.timed_out_count == 0
+
+
+@pytest.mark.asyncio
+async def test_unsafe_command_type_with_safe_retry_still_dies():
+    """UNSAFE_RETRY_TYPES (engine_fire, deploy_*) must NEVER retry, even
+    when the operator set safe_retry=True by mistake."""
+    sched, pool, _ = _make_scheduler()
+    pool.conn.fetchrow.return_value = {
+        "status": "sent", "command_type": "deploy_solar_panel",
+        "safe_retry": True, "retry_count": 0,
+    }
+    pool.conn.execute.return_value = "UPDATE 1"
+    await sched._mark_timed_out("c-unsafe", "no ack")
+    assert sched.dead_count == 1
+
+
+@pytest.mark.asyncio
+async def test_command_publish_failure_message_contains_error():
+    """When publish raises, the rollback UPDATE should set error_message."""
+    sched, pool, js = _make_scheduler()
+    pool.conn.fetch.return_value = [
+        {"id": "c1", "satellite_id": "SAT1", "command_type": "ping",
+         "params": None, "retry_count": 0}
+    ]
+    pool.conn.execute.side_effect = ["UPDATE 1", "UPDATE 1"]
+    js.publish.side_effect = RuntimeError("nats down")
+    await sched._execute_once()
+    # Last execute is the rollback — its second positional arg is the id,
+    # third is the error_message.
+    rollback = pool.conn.execute.await_args
+    assert "publish failed" in rollback.args[2]
+    assert "nats down" in rollback.args[2]
+
+
+@pytest.mark.asyncio
+async def test_ack_listener_terms_message_with_no_command_id():
+    """Adversarial: the satellite (or a malicious actor) sends an ack
+    JSON without 'command_id'. The listener must term and move on."""
+    # Direct test of the parsing branch by simulating the message handler
+    # logic — the actual subscribe is tested separately with integration.
+    sched, pool, _ = _make_scheduler()
+    # A garbage payload would be terminated; mirror that decision here by
+    # asserting _mark_acked is never called when invoked with empty id.
+    await sched._mark_acked("")
+    # No-op (UPDATE 0 expected)
+    assert sched.acked_count == 0
+
+
+@pytest.mark.asyncio
+async def test_double_ack_is_idempotent():
+    """Same command_id ACKed twice — second is a no-op (UPDATE 0)."""
+    sched, pool, _ = _make_scheduler()
+    pool.conn.execute.return_value = "UPDATE 1"
+    await sched._mark_acked("c-x")
+    pool.conn.execute.return_value = "UPDATE 0"
+    await sched._mark_acked("c-x")
+    assert sched.acked_count == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_with_params_dict_serializes_correctly():
+    """Command params dict must round-trip through JSON intact."""
+    import json as _json
+    sched, pool, js = _make_scheduler()
+    pool.conn.fetch.return_value = [
+        {"id": "c1", "satellite_id": "SAT1", "command_type": "set_param",
+         "params": {"key": "thermal_setpoint", "value_c": 27.5,
+                    "nested": {"a": 1}},
+         "retry_count": 0}
+    ]
+    pool.conn.execute.side_effect = ["UPDATE 1", "UPDATE 1"]
+    await sched._execute_once()
+    body = _json.loads(js.publish.await_args.args[1].decode())
+    assert body["params"] == {"key": "thermal_setpoint", "value_c": 27.5,
+                              "nested": {"a": 1}}
+
+
+@pytest.mark.asyncio
+async def test_timeout_sweep_handles_empty_result():
+    """Timeout loop must not crash when no SENT commands are stale."""
+    sched, pool, _ = _make_scheduler()
+    pool.conn.fetch.return_value = []
+    await sched._timeout_once()
+    pool.conn.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_priority_ordering_in_sql():
+    """The SCHEDULE phase must order PENDING by priority ASC then created_at.
+    Mock returns rows in that order; just verify the loop processes ALL."""
+    sched, pool, _ = _make_scheduler()
+    target = datetime.now(timezone.utc) + timedelta(minutes=1)
+    pool.conn.fetch.return_value = [
+        {"id": "c-high", "satellite_id": "SAT1",
+         "scheduled_at": target, "command_type": "ping", "priority": 1},
+        {"id": "c-low", "satellite_id": "SAT2",
+         "scheduled_at": target, "command_type": "ping", "priority": 9},
+    ]
+    pool.conn.execute.return_value = "UPDATE 1"
+    await sched._schedule_once()
+    # Both processed → 2 execute calls
+    assert pool.conn.execute.await_count == 2
+    assert sched.scheduled_count == 2

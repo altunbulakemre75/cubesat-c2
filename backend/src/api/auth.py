@@ -15,12 +15,22 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 
+def _truncate_for_bcrypt(password: str) -> bytes:
+    """bcrypt only considers the first 72 bytes of the password. Modern
+    bcrypt versions REJECT longer inputs with ValueError instead of silently
+    truncating like the older C library did. We truncate explicitly so a
+    user with a long passphrase doesn't get a 500 from the API."""
+    return password.encode()[:72]
+
+
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    return bcrypt.hashpw(_truncate_for_bcrypt(password), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode(), hashed.encode())
+    if not hashed:
+        return False
+    return bcrypt.checkpw(_truncate_for_bcrypt(plain), hashed.encode())
 
 
 def _make_token(subject: str, role: str, *, ttl: timedelta, kind: str) -> str:
