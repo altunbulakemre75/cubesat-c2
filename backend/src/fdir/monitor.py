@@ -143,20 +143,40 @@ class FDIRMonitor:
         # unrecoverable states if the trigger was a false positive (e.g. stale telemetry
         # due to LOS rather than a real fault).
         import json
-        import uuid
-        now = datetime.now(timezone.utc).isoformat()
-        # Shape matches frontend AppEvent: id, type, satellite_id, message,
-        # timestamp, severity. Anything beyond that is ignored by the UI but
-        # kept for log/debug consumers.
+        now = datetime.now(timezone.utc)
+
+        # Persist FIRST so the alert survives a backend restart and operators
+        # can ack it after the WS event is gone. The DB-generated UUID is
+        # reused as the NATS event id so frontend dedupe works end-to-end.
+        alert_id: str | None = None
+        try:
+            async with self._pool.acquire() as conn:
+                alert_id = await conn.fetchval(
+                    """
+                    INSERT INTO fdir_alerts (satellite_id, reason, severity, triggered_at)
+                    VALUES ($1, $2, 'critical', $3)
+                    RETURNING id
+                    """,
+                    satellite_id, reason, now,
+                )
+                alert_id = str(alert_id) if alert_id is not None else None
+        except Exception as exc:  # noqa: BLE001
+            # Don't drop the alert if persistence fails — fall back to a
+            # client-side uuid so the WS event still reaches operators.
+            import uuid
+            alert_id = str(uuid.uuid4())
+            logger.error("FDIR alert persist failed | sat=%s: %s", satellite_id, exc)
+
+        iso_now = now.isoformat()
         payload = {
-            "id": str(uuid.uuid4()),
+            "id": alert_id,
             "type": "fdir_alert",
             "satellite_id": satellite_id,
             "message": f"FDIR alert: {reason}",
-            "timestamp": now,
+            "timestamp": iso_now,
             "severity": "critical",
             "reason": reason,
-            "triggered_at": now,
+            "triggered_at": iso_now,
         }
         subject = f"events.fdir.{satellite_id}"
         try:

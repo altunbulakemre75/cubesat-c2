@@ -26,8 +26,10 @@ _STREAM_NAME = "cubesat"
 _STREAM_SUBJECTS = [
     "telemetry.raw.*",
     "telemetry.canonical.*",
-    "commands.*",
-    "events.>",  # NATS '*' is single-token; use '>' so events.anomaly.<sat> matches
+    # NATS '*' is single-token. We need to cover commands.{sat} (2 tokens) AND
+    # commands.ack.{sat} (3 tokens), so use '>' to match any depth.
+    "commands.>",
+    "events.>",
 ]
 _RAW_SUBJECT = "telemetry.raw.*"
 _CANONICAL_PREFIX = "telemetry.canonical"

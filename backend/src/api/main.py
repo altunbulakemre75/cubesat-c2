@@ -12,13 +12,14 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from src.anomaly.detector import AnomalyDetector
 from src.api.bootstrap import ensure_admin_user
-from src.api.routes import anomalies, auth, commands, passes, satnogs, satellites, stations, telemetry, users
+from src.api.routes import anomalies, auth, commands, fdir, passes, satnogs, satellites, stations, telemetry, users
 from src.api.ws import close_shared_nats, router as ws_router
 from src.config import settings
 from src.fdir.monitor import FDIRMonitor
 from src.ingestion.celestrak import CelestrakRefresher
 from src.ingestion.service import IngestionService, ensure_stream
 from src.ingestion.writer import TelemetryWriter
+from src.scheduler import CommandScheduler
 from src.storage.db import close_pool, get_pool
 from src.storage.migrations import run_migrations
 from src.storage.redis_client import close_client
@@ -64,8 +65,13 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     celestrak = CelestrakRefresher(pool)
     _background_tasks.append(asyncio.create_task(celestrak.run(), name="celestrak"))
 
+    # Command scheduler: drives PENDING→SCHEDULED→TRANSMITTING→SENT→ACKED
+    # via pass_schedule + NATS commands.* + commands.ack.* subjects.
+    scheduler = CommandScheduler(pool, js)
+    _background_tasks.append(asyncio.create_task(scheduler.run(), name="scheduler"))
+
     logger.info(
-        "CubeSat C2 API started — ingestion + writer + anomaly + FDIR + Celestrak running"
+        "CubeSat C2 API started — ingestion + writer + anomaly + FDIR + Celestrak + scheduler running"
     )
 
     yield
@@ -109,6 +115,7 @@ def create_app() -> FastAPI:
     app.include_router(satnogs.router)
     app.include_router(users.router)
     app.include_router(anomalies.router)
+    app.include_router(fdir.router)
     app.include_router(ws_router)
 
     @app.get("/health", tags=["system"])
