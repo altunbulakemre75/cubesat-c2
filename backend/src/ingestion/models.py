@@ -15,7 +15,9 @@ class SatelliteMode(str, Enum):
 class TelemetryParams(BaseModel):
     """Physical telemetry values. Units are explicit in field names."""
 
-    battery_voltage_v: float = Field(..., ge=0.0, le=5.0)
+    # 0-20 V covers 1S-5S Li-ion / LiPo packs typical of CubeSats up to 12U.
+    # Per-mission BatteryBar in the UI scales display to the actual chemistry.
+    battery_voltage_v: float = Field(..., ge=0.0, le=20.0)
     temperature_obcs_c: float = Field(..., ge=-100.0, le=100.0)
     temperature_eps_c: float = Field(..., ge=-100.0, le=100.0)
     solar_power_w: float = Field(..., ge=0.0, le=20.0)

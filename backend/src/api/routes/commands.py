@@ -23,10 +23,7 @@ async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser):
     if mode_str:
         decision = evaluate(body.command_type, SatelliteMode(mode_str))
         if not decision:
-            commands_denied_by_policy_total.labels(
-                satellite_mode=mode_str,
-                command_type=body.command_type,
-            ).inc()
+            commands_denied_by_policy_total.labels(satellite_mode=mode_str).inc()
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=decision.reason)
 
     cmd_id = str(uuid.uuid4())
@@ -50,7 +47,7 @@ async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser):
             user["username"], body.scheduled_at,
         )
 
-    commands_total.labels(status="pending", command_type=body.command_type).inc()
+    commands_total.inc()
     await log_action(
         pool, user["username"], "command.create",
         target_id=cmd_id, target_type="command",

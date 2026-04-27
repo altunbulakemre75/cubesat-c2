@@ -121,17 +121,25 @@ export function CesiumGlobe({ satellites, tles }: Props) {
           )
         }
 
-        // CallbackProperty — Cesium invokes this each render frame.
-        // CallbackProperty for position — Cesium evaluates it every render
-        // frame, so no manual setValue / setInterval. Old positions are
-        // never retained, so we don't get a trail of stale dots.
-        // (CallbackPositionProperty needs Cesium 1.123+; CallbackProperty
-        //  works on every version and is interchangeable here.)
+        // CallbackProperty for position — Cesium invokes this every render
+        // frame (~30-60 fps). Without throttling, N satellites = N × 60
+        // SGP4 propagations/sec on the main thread → page locks at 50+ sats.
+        // We cache the last result for 1 s; a LEO sat moves ~7 km/sec which
+        // is invisible at the dashboard's 18,000 km default zoom.
+        let lastT = 0
+        let lastPos: import('cesium').Cartesian3 | undefined
         const positionCb = new Cesium.CallbackProperty(() => {
-          const t = new Date()
+          const now = Date.now()
+          if (lastPos && now - lastT < 1000) return lastPos
+          const t = new Date(now)
           const pv = propagate(satrec, t)
-          if (!pv.position || typeof pv.position === 'boolean') return undefined
-          return eciToCartesian(pv.position as { x: number; y: number; z: number }, gstime(t))
+          if (!pv.position || typeof pv.position === 'boolean') return lastPos
+          lastPos = eciToCartesian(
+            pv.position as { x: number; y: number; z: number },
+            gstime(t),
+          )
+          lastT = now
+          return lastPos
         }, false) as unknown as import('cesium').PositionProperty
 
         viewer.entities.add({

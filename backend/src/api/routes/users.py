@@ -98,27 +98,33 @@ async def change_role(username: str, body: RoleChange, pool: Pool, user: Current
             detail="Cannot change your own admin role. Ask another admin.",
         )
 
-    # Sorun 2b: sistemdeki son admin silinemez
+    # Sorun 2b + #11: last-admin protection inside a serializable transaction
+    # so two concurrent admin-demotion requests can't both succeed and leave
+    # the system with zero admins. SELECT ... FOR UPDATE locks the target row.
     async with pool.acquire() as conn:
-        target = await conn.fetchrow(
-            "SELECT role FROM users WHERE username = $1", username
-        )
-        if not target:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
-
-        if target["role"] == "admin" and role != "admin":
-            admin_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = TRUE"
+        async with conn.transaction(isolation="serializable"):
+            target = await conn.fetchrow(
+                "SELECT role FROM users WHERE username = $1 FOR UPDATE", username
             )
-            if admin_count <= 1:
-                raise HTTPException(
-                    status.HTTP_400_BAD_REQUEST,
-                    detail="Cannot demote the last admin. Create another admin first.",
-                )
+            if not target:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
 
-        await conn.execute(
-            "UPDATE users SET role = $1 WHERE username = $2", role, username
-        )
+            await conn.execute(
+                "UPDATE users SET role = $1 WHERE username = $2", role, username
+            )
+
+            # Re-check admin count AFTER the update; if we just dropped to 0,
+            # roll back. Serializable isolation forces concurrent demotions
+            # to retry instead of both succeeding.
+            if target["role"] == "admin" and role != "admin":
+                admin_count = await conn.fetchval(
+                    "SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = TRUE"
+                )
+                if admin_count < 1:
+                    raise HTTPException(
+                        status.HTTP_400_BAD_REQUEST,
+                        detail="Cannot demote the last admin. Create another admin first.",
+                    )
 
     await log_action(pool, user["username"], "user.role_change",
                      target_id=username, target_type="user",

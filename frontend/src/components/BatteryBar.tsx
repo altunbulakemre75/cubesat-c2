@@ -2,16 +2,17 @@ import { clsx } from 'clsx'
 
 interface BatteryBarProps {
   voltage: number | null
-  /** Nominal full voltage (default 8.4 V for 2S LiPo) */
+  /** Nominal full voltage. Default 4.2 V (single-cell Li-ion); pass
+   *  8.4 for 2S LiPo or 12.6 for 3S as needed per satellite. */
   maxVoltage?: number
-  /** Cutoff voltage below which we consider empty (default 6.0 V) */
+  /** Cutoff voltage below which we consider empty. Default 3.0 V (1S). */
   minVoltage?: number
 }
 
 export function BatteryBar({
   voltage,
-  maxVoltage = 8.4,
-  minVoltage = 6.0,
+  maxVoltage = 4.2,
+  minVoltage = 3.0,
 }: BatteryBarProps) {
   if (voltage === null || voltage === undefined) {
     return (

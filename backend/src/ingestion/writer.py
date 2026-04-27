@@ -63,10 +63,7 @@ class TelemetryWriter:
             await self._write_to_db(telemetry)
             await self._update_cache(telemetry)
             self._written += 1
-            telemetry_ingested_total.labels(
-                satellite_id=telemetry.satellite_id,
-                source=telemetry.source,
-            ).inc()
+            telemetry_ingested_total.labels(source=telemetry.source).inc()
             logger.debug(
                 "Written | sat=%s seq=%d mode=%s",
                 telemetry.satellite_id,

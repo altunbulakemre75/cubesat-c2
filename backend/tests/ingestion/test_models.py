@@ -46,10 +46,19 @@ def test_all_satellite_modes_accepted():
 
 
 def test_battery_voltage_above_max_rejected():
+    # Range raised from 5 V to 20 V to support 1S–5S Li-ion / LiPo packs.
     params = _valid_params()
-    params["battery_voltage_v"] = 6.0
+    params["battery_voltage_v"] = 25.0
     with pytest.raises(ValidationError):
         CanonicalTelemetry(**_valid_telemetry(params=params))
+
+
+def test_battery_voltage_2s_lipo_accepted():
+    """2S LiPo packs (~7.4 V nominal, 8.4 V full) must validate."""
+    params = _valid_params()
+    params["battery_voltage_v"] = 7.4
+    ct = CanonicalTelemetry(**_valid_telemetry(params=params))
+    assert ct.params.battery_voltage_v == 7.4
 
 
 def test_battery_voltage_below_min_rejected():

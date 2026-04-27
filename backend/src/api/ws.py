@@ -6,8 +6,8 @@ Clients subscribe to:
   /ws/events?token=...                    — streams FDIR + anomaly events
 
 Authentication: JWT passed as query string (browsers can't set custom
-WebSocket headers). Connection is closed with 1008 (Policy Violation)
-if token is missing or invalid.
+WebSocket headers). The handshake is REJECTED (close code 1008) before
+accept() so an unauthenticated client never sees a 101 Upgrade.
 """
 
 import asyncio
@@ -26,7 +26,8 @@ router = APIRouter()
 
 
 async def _authenticate_ws(websocket: WebSocket, token: str | None) -> dict | None:
-    """Validate JWT from query string. Closes WS and returns None on failure."""
+    """Validate JWT BEFORE accept(). Closes the handshake on failure so an
+    unauthenticated client never gets a successful upgrade."""
     if not token:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing token")
         return None
@@ -50,19 +51,23 @@ async def ws_telemetry(
     satellite_id: str,
     token: str | None = Query(default=None),
 ):
-    await websocket.accept()
+    # Auth FIRST — closing without accept() means the client never sees 101
     user = await _authenticate_ws(websocket, token)
     if not user:
         return
 
-    nc = await nats.connect(settings.nats_url)
-    js = nc.jetstream()
-    subject = f"telemetry.canonical.{satellite_id}"
-    sub = await js.subscribe(subject)
+    await websocket.accept()
     websocket_connections_active.labels(channel="telemetry").inc()
-    logger.info("WS telemetry | user=%s sat=%s", user["username"], satellite_id)
 
+    nc = None
+    sub = None
     try:
+        nc = await nats.connect(settings.nats_url)
+        js = nc.jetstream()
+        subject = f"telemetry.canonical.{satellite_id}"
+        sub = await js.subscribe(subject)
+        logger.info("WS telemetry | user=%s sat=%s", user["username"], satellite_id)
+
         async for msg in sub.messages:
             await msg.ack()
             try:
@@ -72,13 +77,18 @@ async def ws_telemetry(
     except (WebSocketDisconnect, asyncio.CancelledError):
         pass
     except Exception as exc:  # noqa: BLE001
-        logger.warning("WS telemetry error | sat=%s: %s", satellite_id, exc)
+        logger.warning("WS telemetry error | sat=%s: %s", satellite_id, exc, exc_info=True)
     finally:
-        try:
-            await sub.unsubscribe()
-        except Exception:  # noqa: BLE001
-            pass
-        await nc.close()
+        if sub is not None:
+            try:
+                await sub.unsubscribe()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("WS telemetry sub.unsubscribe failed: %s", exc)
+        if nc is not None:
+            try:
+                await nc.close()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("WS telemetry nc.close failed: %s", exc)
         websocket_connections_active.labels(channel="telemetry").dec()
         logger.info("WS telemetry closed | sat=%s", satellite_id)
 
@@ -88,12 +98,10 @@ async def ws_events(
     websocket: WebSocket,
     token: str | None = Query(default=None),
 ):
-    await websocket.accept()
+    # Auth + role check BEFORE accept()
     user = await _authenticate_ws(websocket, token)
     if not user:
         return
-
-    # Role gate: only operators and admins receive FDIR/anomaly events
     if user["role"] not in ("operator", "admin"):
         await websocket.close(
             code=status.WS_1008_POLICY_VIOLATION,
@@ -101,13 +109,17 @@ async def ws_events(
         )
         return
 
-    nc = await nats.connect(settings.nats_url)
-    js = nc.jetstream()
-    sub = await js.subscribe("events.>")
+    await websocket.accept()
     websocket_connections_active.labels(channel="events").inc()
-    logger.info("WS events | user=%s", user["username"])
 
+    nc = None
+    sub = None
     try:
+        nc = await nats.connect(settings.nats_url)
+        js = nc.jetstream()
+        sub = await js.subscribe("events.>")
+        logger.info("WS events | user=%s", user["username"])
+
         async for msg in sub.messages:
             await msg.ack()
             try:
@@ -117,12 +129,17 @@ async def ws_events(
     except (WebSocketDisconnect, asyncio.CancelledError):
         pass
     except Exception as exc:  # noqa: BLE001
-        logger.warning("WS events error: %s", exc)
+        logger.warning("WS events error: %s", exc, exc_info=True)
     finally:
-        try:
-            await sub.unsubscribe()
-        except Exception:  # noqa: BLE001
-            pass
-        await nc.close()
+        if sub is not None:
+            try:
+                await sub.unsubscribe()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("WS events sub.unsubscribe failed: %s", exc)
+        if nc is not None:
+            try:
+                await nc.close()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("WS events nc.close failed: %s", exc)
         websocket_connections_active.labels(channel="events").dec()
         logger.info("WS events closed | user=%s", user["username"])

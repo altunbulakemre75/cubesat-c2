@@ -43,8 +43,13 @@ export function useTelemetryWS(satelliteId: string | null): void {
       // onerror is always followed by onclose; let onclose handle reconnect
     }
 
-    ws.onclose = () => {
+    ws.onclose = (event: CloseEvent) => {
       if (!mountedRef.current) return
+      if (event.code === 1008) {
+        console.warn('[TelemetryWS] Auth rejected (1008):', event.reason)
+        useAppStore.getState().clearAuth()
+        return
+      }
       const delay = Math.min(
         BASE_DELAY_MS * Math.pow(2, retryCountRef.current),
         MAX_DELAY_MS,

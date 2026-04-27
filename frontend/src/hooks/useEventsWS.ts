@@ -44,8 +44,15 @@ export function useEventsWS(): void {
       // onerror always precedes onclose
     }
 
-    ws.onclose = () => {
+    ws.onclose = (event: CloseEvent) => {
       if (!mountedRef.current) return
+      // 1008 (Policy Violation) means the server rejected our auth.
+      // Don't retry — clear the token and let the auth guard redirect.
+      if (event.code === 1008) {
+        console.warn('[EventsWS] Auth rejected (1008):', event.reason)
+        useAppStore.getState().clearAuth()
+        return
+      }
       const delay = Math.min(
         BASE_DELAY_MS * Math.pow(2, retryCountRef.current),
         MAX_DELAY_MS,

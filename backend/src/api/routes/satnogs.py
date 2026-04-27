@@ -90,11 +90,16 @@ async def sync_satellite(
 async def import_satnogs_stations(
     pool: Pool,
     user: CurrentUser,
+    background_tasks: BackgroundTasks,
     scope: str = Query(
         default="turkey",
         description=f"Region preset: {', '.join(_BBOX_SCOPES)}",
     ),
     limit: int = Query(default=200, ge=1, le=2000, description="Max stations to import"),
+    recompute_passes: bool = Query(
+        default=True,
+        description="Recompute passes for all satellites with TLE after import",
+    ),
     min_lat: float | None = Query(default=None, description="Override scope bbox"),
     max_lat: float | None = Query(default=None),
     min_lon: float | None = Query(default=None),
@@ -134,29 +139,59 @@ async def import_satnogs_stations(
         and lon_min <= float(s["lng"]) <= lon_max
     ][:limit]
 
+    # SatNOGS sometimes returns name="" (empty), so coalesce to a fallback.
+    rows_to_insert = [
+        (
+            (s.get("name") or "").strip() or f"SatNOGS-{s['id']}",
+            s["id"],
+            float(s["lat"]),
+            float(s["lng"]),
+            float(s.get("altitude", 0) or 0),
+        )
+        for s in filtered
+    ]
+
     imported = 0
     async with pool.acquire() as conn:
-        for s in filtered:
-            result = await conn.execute(
+        # One transaction + executemany — was 2000 sequential round-trips for
+        # scope=world, now ~1 query.
+        async with conn.transaction():
+            before = await conn.fetchval("SELECT COUNT(*) FROM ground_stations")
+            await conn.executemany(
                 """
                 INSERT INTO ground_stations
                   (name, satnogs_id, latitude_deg, longitude_deg, elevation_m)
                 VALUES ($1,$2,$3,$4,$5)
                 ON CONFLICT (satnogs_id) DO NOTHING
                 """,
-                s.get("name", f"SatNOGS-{s['id']}"),
-                s["id"],
-                float(s["lat"]),
-                float(s["lng"]),
-                float(s.get("altitude", 0) or 0),
+                rows_to_insert,
             )
-            if result != "INSERT 0 0":
-                imported += 1
+            after = await conn.fetchval("SELECT COUNT(*) FROM ground_stations")
+            imported = after - before
 
     await log_action(
         pool, user["username"], "satnogs.import_stations",
         details={"scope": scope, "imported": imported, "filtered": len(filtered)},
     )
+
+    # New stations don't show up in pass predictions until passes are recomputed
+    # for each satellite that has a TLE. Otherwise the dashboard says "300
+    # stations imported" but the Pass Schedule only shows the old stations.
+    recomputed_for: list[str] = []
+    if recompute_passes and imported > 0:
+        async with pool.acquire() as conn:
+            tle_rows = await conn.fetch(
+                """
+                SELECT DISTINCT ON (satellite_id) satellite_id, tle_line1, tle_line2
+                FROM tle_history ORDER BY satellite_id, epoch DESC
+                """
+            )
+        for r in tle_rows:
+            background_tasks.add_task(
+                _compute_and_store_passes, pool,
+                r["satellite_id"], r["tle_line1"], r["tle_line2"],
+            )
+            recomputed_for.append(r["satellite_id"])
 
     return {
         "scope": scope,
@@ -164,4 +199,5 @@ async def import_satnogs_stations(
         "imported": imported,
         "found_in_bbox": len(filtered),
         "total_online": len(stations),
+        "passes_recomputing_for": recomputed_for,
     }

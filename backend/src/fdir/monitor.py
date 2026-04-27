@@ -7,18 +7,20 @@ Runs as a background asyncio task alongside the telemetry writer.
 
 import asyncio
 import logging
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 
 import asyncpg
 
-from src.ingestion.models import SatelliteMode
 from src.storage import redis_client
 
 logger = logging.getLogger(__name__)
 
-# Thresholds — override via config if needed
-BATTERY_CRITICAL_V = 3.5     # below this → FDIR warning
+# Thresholds — defaults assume single-cell Li-ion (3.0–4.2 V), matching the
+# simulator and BatteryBar UI default. For 2S/3S/multi-cell missions, override
+# via mission-specific config in a follow-up. Documented in docs/MIMARI.md.
+BATTERY_CRITICAL_V = 3.3     # 1S Li-ion typical safe-mode threshold
 TEMP_OBCS_CRITICAL_C = 65.0  # above this → FDIR warning
 TEMP_EPS_CRITICAL_C = 55.0
 STALE_TELEMETRY_MINUTES = 10  # no telemetry for this long → FDIR trigger
@@ -41,11 +43,15 @@ class FDIRMonitor:
       payload: {"satellite_id": ..., "reason": ..., "triggered_at": ...}
     """
 
+    # LRU cap so deleted/decommissioned satellites don't accumulate state forever
+    _MAX_STATES = 1000
+
     def __init__(self, pool: asyncpg.Pool, js, check_interval_s: float = 60.0) -> None:
         self._pool = pool
         self._js = js
         self._check_interval = check_interval_s
-        self._states: dict[str, FDIRState] = {}
+        # OrderedDict + LRU eviction (same pattern as AnomalyDetector)
+        self._states: OrderedDict[str, FDIRState] = OrderedDict()
 
     async def run(self) -> None:
         logger.info("FDIR monitor started (check every %.0fs)", self._check_interval)
@@ -60,6 +66,13 @@ class FDIRMonitor:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch("SELECT id FROM satellites WHERE active = TRUE")
 
+        active_ids = {row["id"] for row in rows}
+
+        # Evict states for satellites that are no longer active
+        for sat_id in list(self._states):
+            if sat_id not in active_ids:
+                del self._states[sat_id]
+
         for row in rows:
             sat_id = row["id"]
             try:
@@ -69,27 +82,46 @@ class FDIRMonitor:
 
     async def _check_satellite(self, satellite_id: str) -> None:
         last = await redis_client.get_last_telemetry(satellite_id)
-        state = self._states.setdefault(satellite_id, FDIRState(satellite_id))
+
+        if satellite_id in self._states:
+            self._states.move_to_end(satellite_id)  # bump freshness
+        else:
+            self._states[satellite_id] = FDIRState(satellite_id)
+            while len(self._states) > self._MAX_STATES:
+                self._states.popitem(last=False)
+        state = self._states[satellite_id]
         warnings: list[str] = []
 
         if last is None:
             warnings.append("No telemetry received since startup")
         else:
-            ts = datetime.fromisoformat(last["timestamp"])
-            age = datetime.now(timezone.utc) - ts
-            if age > timedelta(minutes=STALE_TELEMETRY_MINUTES):
-                warnings.append(f"Telemetry stale for {age.seconds // 60}m")
+            try:
+                ts = datetime.fromisoformat(last["timestamp"])
+                age = datetime.now(timezone.utc) - ts
+                if age > timedelta(minutes=STALE_TELEMETRY_MINUTES):
+                    warnings.append(f"Telemetry stale for {age.seconds // 60}m")
+            except (KeyError, ValueError) as exc:
+                warnings.append(f"Bad timestamp in cached telemetry: {exc}")
 
-            bat = last.get("battery_voltage_v", 99)
-            if bat < BATTERY_CRITICAL_V:
+            # Distinguish "field missing" from "value below threshold". Hiding
+            # missing values behind a sentinel (e.g. 99 V) silently masks
+            # broken telemetry as healthy.
+            bat = last.get("battery_voltage_v")
+            if bat is None:
+                warnings.append("Missing battery_voltage_v in telemetry")
+            elif bat < BATTERY_CRITICAL_V:
                 warnings.append(f"Battery critical: {bat:.2f}V < {BATTERY_CRITICAL_V}V")
 
-            t_obcs = last.get("temperature_obcs_c", 0)
-            if t_obcs > TEMP_OBCS_CRITICAL_C:
+            t_obcs = last.get("temperature_obcs_c")
+            if t_obcs is None:
+                warnings.append("Missing temperature_obcs_c")
+            elif t_obcs > TEMP_OBCS_CRITICAL_C:
                 warnings.append(f"OBC temperature critical: {t_obcs:.1f}°C")
 
-            t_eps = last.get("temperature_eps_c", 0)
-            if t_eps > TEMP_EPS_CRITICAL_C:
+            t_eps = last.get("temperature_eps_c")
+            if t_eps is None:
+                warnings.append("Missing temperature_eps_c")
+            elif t_eps > TEMP_EPS_CRITICAL_C:
                 warnings.append(f"EPS temperature critical: {t_eps:.1f}°C")
 
         state.warnings = warnings

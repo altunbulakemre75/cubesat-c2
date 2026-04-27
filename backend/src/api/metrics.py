@@ -9,38 +9,45 @@ from prometheus_client import Counter, Gauge, Histogram
 
 # ── Telemetry pipeline ───────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Cardinality discipline:
+# Prometheus stores one time-series per unique label combination. A label
+# value driven by user input (command_type, satellite_id created on first
+# telemetry packet) means an attacker with one curl can create millions of
+# series and OOM the Prometheus server. We deliberately keep labels SHORT
+# and BOUNDED. For per-satellite breakdown, query the database, not metrics.
+# ──────────────────────────────────────────────────────────────────────────────
+
 telemetry_ingested_total = Counter(
     "cubesat_telemetry_ingested_total",
     "Number of telemetry packets written to TimescaleDB",
-    ["satellite_id", "source"],
+    ["source"],   # bounded set: ax25, kiss, ccsds, simulated, satnogs
 )
 
 telemetry_decode_errors_total = Counter(
     "cubesat_telemetry_decode_errors_total",
     "Protocol adapter decode failures (bad frames)",
-    ["protocol"],
+    ["protocol"],   # bounded
 )
 
 # ── Commands ─────────────────────────────────────────────────────────────────
 
 commands_total = Counter(
     "cubesat_commands_total",
-    "Commands created by status",
-    ["status", "command_type"],
+    "Total commands created (no per-type label — query DB for that)",
 )
 
 commands_denied_by_policy_total = Counter(
     "cubesat_commands_denied_by_policy_total",
     "Commands rejected by the policy engine (wrong satellite mode)",
-    ["satellite_mode", "command_type"],
+    ["satellite_mode"],   # bounded enum
 )
 
 # ── Passes ───────────────────────────────────────────────────────────────────
 
 pass_predictions_total = Counter(
     "cubesat_pass_predictions_total",
-    "Pass windows computed and stored",
-    ["satellite_id"],
+    "Pass windows computed and stored (no per-satellite label)",
 )
 
 # ── Anomalies + FDIR ─────────────────────────────────────────────────────────
@@ -48,13 +55,13 @@ pass_predictions_total = Counter(
 anomalies_detected_total = Counter(
     "cubesat_anomalies_detected_total",
     "Anomalies detected by the z-score detector",
-    ["satellite_id", "parameter", "severity"],
+    ["parameter", "severity"],   # bounded: 5 params × 2 severities = 10 series
 )
 
 fdir_alerts_total = Counter(
     "cubesat_fdir_alerts_total",
     "FDIR safe-mode alerts raised",
-    ["satellite_id", "reason_category"],
+    ["reason_category"],   # bounded enum
 )
 
 # ── System state ─────────────────────────────────────────────────────────────
