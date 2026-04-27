@@ -7,8 +7,10 @@ const MAX_TELEMETRY_POINTS = 100
 interface AppState {
   // Auth (in-memory only — no localStorage)
   token: string | null
+  refreshToken: string | null
   username: string | null
   setAuth: (token: string, username: string) => void
+  setRefreshToken: (rt: string) => void
   clearAuth: () => void
 
   // Active satellite selection
@@ -36,9 +38,11 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set) => ({
   token: null,
+  refreshToken: null,
   username: null,
   setAuth: (token, username) => set({ token, username }),
-  clearAuth: () => set({ token: null, username: null }),
+  setRefreshToken: (rt) => set({ refreshToken: rt }),
+  clearAuth: () => set({ token: null, refreshToken: null, username: null }),
 
   activeSatelliteId: null,
   setActiveSatelliteId: (id) => set({ activeSatelliteId: id }),

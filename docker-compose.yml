@@ -134,6 +134,34 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
       - ./deployment/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+      - loki
+    restart: unless-stopped
+
+  # === Loki (log aggregation) ===
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: cubesat-loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./deployment/loki/loki-config.yml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    restart: unless-stopped
+
+  # === Promtail (log shipper — tails container logs to Loki) ===
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: cubesat-promtail
+    volumes:
+      - ./deployment/loki/promtail-config.yml:/etc/promtail/config.yml
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
     restart: unless-stopped
 
 volumes:
@@ -141,6 +169,7 @@ volumes:
   redis-data:
   nats-data:
   grafana-data:
+  loki-data:
 
 networks:
   default:

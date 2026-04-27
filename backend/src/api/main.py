@@ -10,10 +10,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from src.anomaly.detector import AnomalyDetector
 from src.api.bootstrap import ensure_admin_user
 from src.api.routes import anomalies, auth, commands, passes, satnogs, satellites, stations, telemetry, users
 from src.api.ws import close_shared_nats, router as ws_router
 from src.config import settings
+from src.fdir.monitor import FDIRMonitor
+from src.ingestion.celestrak import CelestrakRefresher
 from src.ingestion.service import IngestionService, ensure_stream
 from src.ingestion.writer import TelemetryWriter
 from src.storage.db import close_pool, get_pool
@@ -44,10 +47,26 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     ingestion = IngestionService(js, protocol="ax25")
     _background_tasks.append(asyncio.create_task(ingestion.run(), name="ingestion"))
 
-    writer = TelemetryWriter(js, pool)
+    # Anomaly detector is shared between writer (per-packet feed) and any
+    # future API endpoint that wants to query its state.
+    detector = AnomalyDetector()
+
+    writer = TelemetryWriter(js, pool, detector=detector)
     _background_tasks.append(asyncio.create_task(writer.run(), name="writer"))
 
-    logger.info("CubeSat C2 API started — ingestion and writer running")
+    # FDIR monitor: periodic background task that scans Redis cache for stale
+    # telemetry / out-of-bounds values and publishes events.fdir.* on NATS.
+    fdir = FDIRMonitor(pool, js, check_interval_s=60.0)
+    _background_tasks.append(asyncio.create_task(fdir.run(), name="fdir"))
+
+    # Celestrak TLE auto-refresh: every 6h, pull fresh TLEs for any satellite
+    # that has a NORAD ID. Was manual-only; now self-healing.
+    celestrak = CelestrakRefresher(pool)
+    _background_tasks.append(asyncio.create_task(celestrak.run(), name="celestrak"))
+
+    logger.info(
+        "CubeSat C2 API started — ingestion + writer + anomaly + FDIR + Celestrak running"
+    )
 
     yield
 

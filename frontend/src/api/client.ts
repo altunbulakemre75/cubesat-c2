@@ -42,9 +42,13 @@ export interface LoginResult {
 export async function login(username: string, password: string): Promise<LoginResult> {
   const res = await apiClient.post<{
     access_token: string
+    refresh_token: string | null
     must_change_password: boolean
   }>('/auth/login', { username, password })
   useAppStore.getState().setAuth(res.data.access_token, username)
+  if (res.data.refresh_token) {
+    useAppStore.getState().setRefreshToken(res.data.refresh_token)
+  }
   return { mustChangePassword: res.data.must_change_password }
 }
 
@@ -53,6 +57,30 @@ export async function changePassword(oldPassword: string, newPassword: string): 
     old_password: oldPassword,
     new_password: newPassword,
   })
+}
+
+export async function logout(): Promise<void> {
+  try { await apiClient.post('/auth/logout') }
+  catch { /* even if revocation fails on the server, drop local state */ }
+  useAppStore.getState().clearAuth()
+}
+
+export async function refreshAccessToken(): Promise<boolean> {
+  const refreshToken = useAppStore.getState().refreshToken
+  if (!refreshToken) return false
+  try {
+    const res = await apiClient.post<{ access_token: string; refresh_token: string }>(
+      '/auth/refresh',
+      { refresh_token: refreshToken },
+    )
+    const username = useAppStore.getState().username ?? ''
+    useAppStore.getState().setAuth(res.data.access_token, username)
+    useAppStore.getState().setRefreshToken(res.data.refresh_token)
+    return true
+  } catch {
+    useAppStore.getState().clearAuth()
+    return false
+  }
 }
 
 export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL ?? 'ws://localhost:8000'

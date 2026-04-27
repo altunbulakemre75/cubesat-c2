@@ -4,6 +4,25 @@ Bu doküman projenin tüm geliştirme fazlarını ve alt adımlarını içerir. 
 
 ---
 
+## Genel Durum (Nisan 2026)
+
+| Faz | Konu | Durum | Not |
+|-----|------|-------|-----|
+| 0 | Kurulum | ✅ Tamamlandı | Docker, Python, Node hazır |
+| 1 | Çekirdek Veri Akışı | ✅ Tamamlandı | Sim → NATS → Writer (batch) → Timescale |
+| 2 | Pipeline Sağlamlaştırma | ✅ Tamamlandı | Multi-adapter (AX.25/KISS/CCSDS), JetStream durable, NAK on failure |
+| 3 | Komut & Kontrol | ✅ Tamamlandı | RBAC, JWT refresh+logout, two-admin approval, state machine |
+| 4 | Görselleştirme | ✅ Tamamlandı | Cesium globe, Recharts, WS streams, anomaly toasts |
+| 5 | Operasyonel Olgunluk | ✅ Tamamlandı | Anomaly detector wired, FDIR, Celestrak refresher, Loki + Prometheus + Grafana |
+| 6 | Açık Kaynak Yayını | ✅ Tamamlandı | v0.1.0 tagli, Apache 2.0, SECURITY.md, GitHub güvenlik özellikleri |
+
+**Bilinen tamamlanmamış noktalar:**
+- HF/UHF gerçek radyo entegrasyonu (donanım bekleniyor)
+- Production K8s deploy (şu an docker-compose-only)
+- E2E testler (sadece backend unit + frontend Vitest var)
+
+---
+
 ## Faz 0: Kurulum (Tamamlandı ✓)
 
 Amaç: Geliştirme ortamı hazır, workspace çalışır durumda.
