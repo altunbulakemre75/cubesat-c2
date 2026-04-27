@@ -76,6 +76,57 @@ class SatNOGSClient:
         results = await self._get_all_pages(f"{_BASE_NETWORK}/observations/", params)
         return results[:limit]
 
+    # ── Telemetry (db.satnogs.org) ────────────────────────────────────────────
+
+    async def get_recent_telemetry(
+        self,
+        norad_cat_id: int,
+        limit: int = 25,
+    ) -> list[dict[str, Any]]:
+        """
+        Fetch recent demodulated telemetry frames from SatNOGS DB.
+
+        Requires an API token (set SATNOGS_API_TOKEN). Without one this
+        endpoint returns 401 — callers should fall back to
+        get_recent_observations() which works anonymously.
+
+        Returns a list of records like:
+          {"norad_cat_id": int, "observer": str, "timestamp": ISO,
+           "frame": <hex>, "decoded": <str|None>, "transmitter": str,
+           "app_source": "satnogs"|"sids"|...}
+        """
+        url = f"{_BASE_DB}/telemetry/?format=json&satellite={norad_cat_id}"
+        data = await self._get_all_pages(url, {}, max_pages=1)
+        return data[:limit]
+
+    # ── Observations (network.satnogs.org — anonymous-friendly) ───────────────
+
+    async def get_recent_observations(
+        self,
+        norad_cat_id: int,
+        limit: int = 25,
+        vetted_status: str = "good",
+    ) -> list[dict[str, Any]]:
+        """
+        Fetch recent ground-station observation sessions for a satellite.
+
+        Works anonymously — no API token needed. Each record describes a
+        scheduled session: when it started, which ground station ran it,
+        the vetted status, and (if any) demodulated data file links.
+
+        Returns records like:
+          {"id": int, "start": ISO, "end": ISO, "ground_station": int,
+           "transmitter": str, "vetted_status": "good|bad|...",
+           "norad_cat_id": int, "demoddata": [...links...]}
+        """
+        url = (
+            f"{_BASE_NETWORK}/observations/?format=json"
+            f"&norad_cat_id={norad_cat_id}"
+            f"&vetted_status={vetted_status}"
+        )
+        data = await self._get_all_pages(url, {}, max_pages=1)
+        return data[:limit]
+
     # ── TLE ───────────────────────────────────────────────────────────────────
 
     async def get_tle(self, norad_cat_id: int) -> dict[str, str] | None:

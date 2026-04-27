@@ -6,6 +6,7 @@ import { SatelliteCard } from '../components/SatelliteCard'
 import { AlertBanner } from '../components/AlertBanner'
 import { CesiumGlobe } from '../components/CesiumGlobe'
 import { SatelliteAddModal } from '../components/SatelliteAddModal'
+import { SatnogsObservationsPanel } from '../components/SatnogsObservationsPanel'
 import { useAppStore } from '../store'
 import type { AppEvent } from '../types'
 
@@ -159,6 +160,14 @@ export function Dashboard() {
             Active Alerts
           </h2>
           <AlertBanner />
+        </div>
+
+        {/* SatNOGS real-world frames */}
+        <div className="border-b border-space-border p-3">
+          <h2 className="mb-2 font-mono text-xs font-semibold uppercase tracking-wider text-gray-400">
+            SatNOGS Observations
+          </h2>
+          <SatnogsObservationsPanel limit={6} />
         </div>
 
         {/* Events feed */}

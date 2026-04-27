@@ -6,11 +6,18 @@ POST /satnogs/sync/{satellite_id}?norad_id=25544
 
 POST /satnogs/import-stations?scope=turkey|europe|world
   → Imports online SatNOGS stations into ground_stations table.
+
+GET  /satnogs/observations?satellite_id=...&limit=20
+  → Returns recent demodulated frames pulled from db.satnogs.org by the
+    background fetcher. This is REAL satellite telemetry (amateur cubesats).
 """
 
 import logging
+from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
+from pydantic import BaseModel
 
 from src.api.audit import log_action
 from src.api.deps import CurrentUser, Pool
@@ -18,6 +25,18 @@ from src.api.rbac import Role, require_role
 from src.api.routes.satellites import _compute_and_store_passes, _parse_tle_epoch
 from src.config import settings
 from src.ingestion.satnogs_client import SatNOGSClient
+
+
+class SatnogsObservationOut(BaseModel):
+    id: int
+    satellite_id: str | None
+    norad_cat_id: int
+    observer: str | None
+    transmitter: str | None
+    timestamp_utc: datetime
+    frame_hex: str | None
+    decoded_json: dict[str, Any] | None
+    app_source: str | None
 
 # Pre-defined bounding boxes (lat_min, lat_max, lon_min, lon_max)
 _BBOX_SCOPES = {
@@ -201,3 +220,54 @@ async def import_satnogs_stations(
         "total_online": len(stations),
         "passes_recomputing_for": recomputed_for,
     }
+
+
+@router.get("/observations", response_model=list[SatnogsObservationOut])
+async def list_observations(
+    pool: Pool,
+    user: CurrentUser,
+    satellite_id: str | None = Query(default=None),
+    norad_id: int | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=500),
+):
+    """List recent SatNOGS observations persisted by the background fetcher.
+
+    Returns the most recent first. Filter by satellite_id (our internal id)
+    or by norad_id; both are optional."""
+    require_role(Role.VIEWER, user["role"])
+
+    conditions = ["TRUE"]
+    args: list = []
+    if satellite_id:
+        args.append(satellite_id)
+        conditions.append(f"satellite_id = ${len(args)}")
+    if norad_id:
+        args.append(norad_id)
+        conditions.append(f"norad_cat_id = ${len(args)}")
+    args.append(limit)
+
+    query = f"""
+        SELECT id, satellite_id, norad_cat_id, observer, transmitter,
+               timestamp_utc, frame_hex, decoded_json, app_source
+          FROM satnogs_observations
+         WHERE {' AND '.join(conditions)}
+         ORDER BY timestamp_utc DESC
+         LIMIT ${len(args)}
+    """
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(query, *args)
+
+    return [
+        SatnogsObservationOut(
+            id=r["id"],
+            satellite_id=r["satellite_id"],
+            norad_cat_id=r["norad_cat_id"],
+            observer=r["observer"],
+            transmitter=r["transmitter"],
+            timestamp_utc=r["timestamp_utc"],
+            frame_hex=r["frame_hex"],
+            decoded_json=r["decoded_json"],
+            app_source=r["app_source"],
+        )
+        for r in rows
+    ]

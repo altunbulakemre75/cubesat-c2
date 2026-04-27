@@ -17,6 +17,7 @@ from src.api.ws import close_shared_nats, router as ws_router
 from src.config import settings
 from src.fdir.monitor import FDIRMonitor
 from src.ingestion.celestrak import CelestrakRefresher
+from src.ingestion.satnogs_fetcher import SatnogsTelemetryFetcher
 from src.ingestion.service import IngestionService, ensure_stream
 from src.ingestion.writer import TelemetryWriter
 from src.scheduler import CommandScheduler
@@ -70,8 +71,14 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     scheduler = CommandScheduler(pool, js)
     _background_tasks.append(asyncio.create_task(scheduler.run(), name="scheduler"))
 
+    # SatNOGS DB telemetry fetcher: pulls real demodulated frames from
+    # amateurs around the world for any satellite that has a NORAD ID.
+    satnogs_fetcher = SatnogsTelemetryFetcher(pool)
+    _background_tasks.append(asyncio.create_task(satnogs_fetcher.run(), name="satnogs_fetcher"))
+
     logger.info(
-        "CubeSat C2 API started — ingestion + writer + anomaly + FDIR + Celestrak + scheduler running"
+        "CubeSat C2 API started — ingestion + writer + anomaly + FDIR + "
+        "Celestrak + scheduler + SatNOGS fetcher running"
     )
 
     yield
