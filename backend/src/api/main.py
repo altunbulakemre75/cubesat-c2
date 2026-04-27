@@ -127,7 +127,54 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["system"])
     async def health() -> dict:
+        """Liveness probe: returns ok as long as the process is running.
+        Does not check downstreams — those belong on /ready."""
         return {"status": "ok"}
+
+    @app.get("/ready", tags=["system"])
+    async def ready() -> dict | tuple:
+        """Readiness probe: returns ok only when DB, NATS and Redis are
+        all reachable. Used by k8s/docker to decide when to route traffic.
+        Each downstream is timeboxed (2s wall clock) so a hung dependency
+        can't pin the probe response."""
+        from fastapi.responses import JSONResponse
+        import asyncio
+
+        _PROBE_TIMEOUT_S = 2.0
+
+        async def _safe(coro_factory) -> bool:
+            """Run the check; any exception OR timeout = unhealthy."""
+            try:
+                return await asyncio.wait_for(coro_factory(), timeout=_PROBE_TIMEOUT_S)
+            except Exception:  # noqa: BLE001
+                return False
+
+        async def _db() -> bool:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute("SELECT 1")
+            return True
+
+        async def _nats() -> bool:
+            from src.api.ws import _get_shared_nats
+            nc = await _get_shared_nats()
+            return bool(nc.is_connected)
+
+        async def _redis() -> bool:
+            from src.storage import redis_client
+            client = redis_client.get_client()
+            return bool(await client.ping())
+
+        db_ok, nats_ok, redis_ok = await asyncio.gather(
+            _safe(_db), _safe(_nats), _safe(_redis),
+        )
+        body = {
+            "status": "ok" if (db_ok and nats_ok and redis_ok) else "degraded",
+            "checks": {"db": db_ok, "nats": nats_ok, "redis": redis_ok},
+        }
+        if not (db_ok and nats_ok and redis_ok):
+            return JSONResponse(content=body, status_code=503)
+        return body
 
     return app
 

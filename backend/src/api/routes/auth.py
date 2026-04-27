@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from jose import JWTError
 
 from src.api.audit import log_action
@@ -16,6 +16,7 @@ from src.api.auth import (
 )
 from src.api.deps import CurrentUser, Pool
 from src.api.metrics import auth_login_total
+from src.api.rate_limit import check_login_rate, reset_login_rate
 from src.api.schemas import LoginRequest, TokenResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -33,7 +34,16 @@ class RefreshRequest(BaseModel):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, pool: Pool):
+async def login(body: LoginRequest, request: Request, pool: Pool):
+    # Rate limit BEFORE the bcrypt verify — otherwise an attacker can
+    # still burn server CPU on bcrypt rounds for every probe.
+    if not await check_login_rate(request, body.username):
+        auth_login_total.labels(result="rate_limited").inc()
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts; try again in a few minutes",
+        )
+
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
@@ -51,6 +61,10 @@ async def login(body: LoginRequest, pool: Pool):
     if not row["active"]:
         auth_login_total.labels(result="disabled").inc()
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account disabled")
+
+    # Successful login — clear the rate-limit counter so a single typo
+    # doesn't cost the user their next four attempts.
+    await reset_login_rate(request, row["username"])
 
     access = create_access_token(subject=row["username"], role=row["role"])
     refresh = create_refresh_token(subject=row["username"], role=row["role"])

@@ -13,6 +13,12 @@ eggs/
 /lib/
 lib64/
 parts/
+
+# === Playwright ===
+frontend/test-results/
+frontend/playwright-report/
+frontend/playwright/.cache/
+
 sdist/
 var/
 wheels/
