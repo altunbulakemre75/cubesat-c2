@@ -1,22 +1,99 @@
 import uuid
 
 from fastapi import APIRouter, HTTPException, Query, status
+from pydantic import BaseModel
 
 from src.api.audit import log_action
 from src.api.deps import CurrentUser, Pool
 from src.api.metrics import commands_denied_by_policy_total, commands_total
 from src.api.rbac import Role, require_role
 from src.api.schemas import CommandCreate, CommandOut
-from src.commands.policy import evaluate
+from src.commands.models import CommandStatus, MAX_RETRIES, UNSAFE_RETRY_TYPES
+from src.commands.policy import ADMIN_ONLY_COMMANDS, TWO_ADMIN_COMMANDS, evaluate
 from src.ingestion.models import SatelliteMode
 from src.storage.redis_client import get_satellite_mode
 
 router = APIRouter(prefix="/commands", tags=["commands"])
 
+# Valid transition targets via PATCH endpoint
+_ALLOWED_TRANSITIONS = {
+    "scheduled", "transmitting", "sent", "acked", "timeout", "retry",
+}
+
+
+# ── Request schemas ───────────────────────────────────────────────────────────
+
+class TransitionRequest(BaseModel):
+    target_status: str
+    error_message: str | None = None
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("", response_model=CommandOut, status_code=status.HTTP_201_CREATED)
 async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser):
     require_role(Role.OPERATOR, user["role"])
+
+    # Admin-only commands require admin role
+    if body.command_type in ADMIN_ONLY_COMMANDS:
+        require_role(Role.ADMIN, user["role"])
+
+    # Two-admin approval: for now, require admin role and log the requirement.
+    # Full two-admin workflow (pending approval queue) is tracked for follow-up.
+    if body.command_type in TWO_ADMIN_COMMANDS:
+        require_role(Role.ADMIN, user["role"])
+        # Check if another admin has already approved a command with the same
+        # idempotency key (simple approval gate)
+        if body.idempotency_key:
+            async with pool.acquire() as conn:
+                existing = await conn.fetchrow(
+                    """
+                    SELECT created_by FROM commands
+                    WHERE idempotency_key = $1 AND status = 'pending'
+                    """,
+                    body.idempotency_key,
+                )
+                if existing and existing["created_by"] == user["username"]:
+                    raise HTTPException(
+                        status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"Command type '{body.command_type}' requires approval from "
+                            f"a DIFFERENT admin. You already submitted this command."
+                        ),
+                    )
+                if existing and existing["created_by"] != user["username"]:
+                    # Second admin confirming — transition the existing command to scheduled
+                    await conn.execute(
+                        """
+                        UPDATE commands SET status = 'scheduled', updated_at = NOW()
+                        WHERE idempotency_key = $1 AND status = 'pending'
+                        """,
+                        body.idempotency_key,
+                    )
+                    await log_action(
+                        pool, user["username"], "command.two_admin_approve",
+                        target_id=str(existing.get("id", "")),
+                        target_type="command",
+                        details={
+                            "original_admin": existing["created_by"],
+                            "approving_admin": user["username"],
+                            "command_type": body.command_type,
+                        },
+                    )
+                    # Return the updated command
+                    row = await conn.fetchrow(
+                        "SELECT * FROM commands WHERE idempotency_key = $1",
+                        body.idempotency_key,
+                    )
+                    return _row_to_command(row)
+        else:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Command type '{body.command_type}' requires two-admin approval. "
+                    f"You must provide an idempotency_key so the second admin can confirm."
+                ),
+            )
 
     # Policy check: is this command allowed for the satellite's current mode?
     mode_str = await get_satellite_mode(body.satellite_id)
@@ -54,6 +131,94 @@ async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser):
         details={"satellite_id": body.satellite_id, "command_type": body.command_type},
     )
     return _row_to_command(row)
+
+
+@router.patch("/{command_id}/transition", response_model=CommandOut)
+async def transition_command(
+    command_id: str,
+    body: TransitionRequest,
+    pool: Pool,
+    user: CurrentUser,
+):
+    """
+    Advance a command through the state machine.
+
+    Valid transitions are enforced by the Command model's transition table.
+    Only operators and admins can transition commands.
+    """
+    require_role(Role.OPERATOR, user["role"])
+
+    if body.target_status not in _ALLOWED_TRANSITIONS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid target status '{body.target_status}'. "
+                   f"Allowed: {sorted(_ALLOWED_TRANSITIONS)}",
+        )
+
+    target = CommandStatus(body.target_status)
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM commands WHERE id = $1", command_id)
+        if not row:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Command not found")
+
+        current = CommandStatus(row["status"])
+
+        # Validate state machine transition
+        valid_next = _TRANSITIONS_MAP.get(current, set())
+        if target not in valid_next:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Cannot transition from '{current.value}' to '{target.value}'. "
+                       f"Valid targets: {sorted(s.value for s in valid_next)}",
+            )
+
+        # Retry-specific checks
+        if target == CommandStatus.RETRY:
+            if row["retry_count"] >= MAX_RETRIES:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Max retries ({MAX_RETRIES}) exhausted for command {command_id}",
+                )
+            if row["command_type"] in UNSAFE_RETRY_TYPES:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Command type '{row['command_type']}' is unsafe to retry",
+                )
+            if not row["safe_retry"]:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Command was not marked as safe_retry",
+                )
+
+        # Build the UPDATE
+        updates = ["status = $2", "updated_at = NOW()"]
+        args: list = [command_id, target.value]
+
+        if target == CommandStatus.SENT:
+            updates.append("sent_at = NOW()")
+        elif target == CommandStatus.ACKED:
+            updates.append("acked_at = NOW()")
+        elif target == CommandStatus.RETRY:
+            updates.append(f"retry_count = retry_count + 1")
+
+        if body.error_message:
+            args.append(body.error_message)
+            updates.append(f"error_message = ${len(args)}")
+
+        query = f"UPDATE commands SET {', '.join(updates)} WHERE id = $1 RETURNING *"
+        updated = await conn.fetchrow(query, *args)
+
+    await log_action(
+        pool, user["username"], "command.transition",
+        target_id=command_id, target_type="command",
+        details={
+            "from": current.value,
+            "to": target.value,
+            "error_message": body.error_message,
+        },
+    )
+    return _row_to_command(updated)
 
 
 @router.get("", response_model=list[CommandOut])
@@ -103,6 +268,21 @@ async def cancel_command(command_id: str, pool: Pool, user: CurrentUser):
         pool, user["username"], "command.cancel",
         target_id=command_id, target_type="command",
     )
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+# Mirror of the transition table from src/commands/models.py for DB-level validation
+_TRANSITIONS_MAP: dict[CommandStatus, set[CommandStatus]] = {
+    CommandStatus.PENDING: {CommandStatus.SCHEDULED, CommandStatus.DEAD},
+    CommandStatus.SCHEDULED: {CommandStatus.TRANSMITTING, CommandStatus.PENDING, CommandStatus.DEAD},
+    CommandStatus.TRANSMITTING: {CommandStatus.SENT, CommandStatus.TIMEOUT},
+    CommandStatus.SENT: {CommandStatus.ACKED, CommandStatus.TIMEOUT},
+    CommandStatus.ACKED: set(),
+    CommandStatus.TIMEOUT: {CommandStatus.RETRY, CommandStatus.DEAD},
+    CommandStatus.RETRY: {CommandStatus.TRANSMITTING, CommandStatus.DEAD},
+    CommandStatus.DEAD: set(),
+}
 
 
 def _row_to_command(row) -> CommandOut:

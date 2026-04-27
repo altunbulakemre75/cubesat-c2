@@ -12,7 +12,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from src.api.bootstrap import ensure_admin_user
 from src.api.routes import anomalies, auth, commands, passes, satnogs, satellites, stations, telemetry, users
-from src.api.ws import router as ws_router
+from src.api.ws import close_shared_nats, router as ws_router
 from src.config import settings
 from src.ingestion.service import IngestionService, ensure_stream
 from src.ingestion.writer import TelemetryWriter
@@ -56,6 +56,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
         task.cancel()
     await asyncio.gather(*_background_tasks, return_exceptions=True)
     await nc.close()
+    await close_shared_nats()
     await close_pool()
     await close_client()
 
