@@ -110,6 +110,8 @@ class PassOut(BaseModel):
     los: datetime
     max_elevation_deg: float
     azimuth_at_aos_deg: float | None
+    # Only passes over uplink-capable stations are used for commanding.
+    uplink_capable: bool = False
 
 
 # ── Anomalies ─────────────────────────────────────────────────────────────────

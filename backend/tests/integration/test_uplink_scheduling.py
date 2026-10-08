@@ -124,3 +124,17 @@ def test_stations_created_by_operators_are_uplink_capable_by_default(
 
     assert own.json()["uplink_capable"] is True
     assert rx_only.json()["uplink_capable"] is False
+
+
+def test_pass_list_tells_which_passes_can_carry_commands(client: TestClient, db: Db) -> None:
+    db.execute("INSERT INTO satellites (id, name) VALUES ('SAT1', 'SAT1') ON CONFLICT DO NOTHING")
+    _station(db, 1, uplink=False, satnogs_id=42)
+    _station(db, 2, uplink=True)
+    _pass(db, 1, 5, 15)
+    _pass(db, 2, 30, 40)
+    db.create_user("viewer", "pass-list-password", "viewer")
+    viewer = bearer(login(client, "viewer", "pass-list-password")["access_token"])
+
+    passes = client.get("/passes", params={"satellite_id": "SAT1"}, headers=viewer).json()
+
+    assert [(p["station_id"], p["uplink_capable"]) for p in passes] == [(1, False), (2, True)]

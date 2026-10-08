@@ -41,6 +41,7 @@ export interface Pass {
   los: string
   max_elevation_deg: number
   azimuth_at_aos_deg: number
+  uplink_capable?: boolean
 }
 
 export interface Command {

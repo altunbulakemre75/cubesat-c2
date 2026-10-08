@@ -4,6 +4,7 @@ import { fetchSatellites } from '../api/satellites'
 import { fetchPasses } from '../api/passes'
 import { useAppStore } from '../store'
 import type { Pass, SatelliteListItem } from '../types'
+import { passKind } from '../lib/passKind'
 
 const HOUR_MS = 3_600_000
 const DAY_MS = 24 * HOUR_MS
@@ -110,6 +111,7 @@ function SatPassRow({ satellite, windowStart }: SatPassRowProps) {
           const { left, width } = passBarStyle(pass, windowStart)
           const duration = passDurationMin(pass)
           const isHigh = pass.max_elevation_deg > 30
+          const kind = passKind(pass)
 
           return (
             <div
@@ -124,6 +126,8 @@ function SatPassRow({ satellite, windowStart }: SatPassRowProps) {
                   isHigh
                     ? 'bg-green-600 hover:bg-green-500'
                     : 'bg-blue-700 hover:bg-blue-600',
+                  // Uplink windows stand out; receive-only passes are dimmed.
+                  kind.label === 'UPLINK' ? 'ring-2 ring-amber-400' : 'opacity-50',
                 )}
               />
               {/* Tooltip on hover */}
@@ -133,6 +137,9 @@ function SatPassRow({ satellite, windowStart }: SatPassRowProps) {
                   {formatTime(pass.aos)} — {formatTime(pass.los)} ({duration.toFixed(1)} min)
                 </p>
                 <p className="text-green-400">Max El: {pass.max_elevation_deg.toFixed(1)}°</p>
+                <p className={kind.label === 'UPLINK' ? 'text-amber-300' : 'text-gray-500'}>
+                  {kind.description}
+                </p>
               </div>
             </div>
           )

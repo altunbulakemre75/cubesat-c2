@@ -30,7 +30,8 @@ async def list_passes(
     args.append(limit)
     query = f"""
         SELECT p.id, p.satellite_id, p.station_id, gs.name AS station_name,
-               p.aos, p.los, p.max_elevation_deg, p.azimuth_at_aos_deg
+               p.aos, p.los, p.max_elevation_deg, p.azimuth_at_aos_deg,
+               gs.uplink_capable
         FROM pass_schedule p
         JOIN ground_stations gs ON gs.id = p.station_id
         WHERE {' AND '.join(conditions)}
@@ -50,6 +51,7 @@ async def list_passes(
             los=row["los"],
             max_elevation_deg=row["max_elevation_deg"],
             azimuth_at_aos_deg=row["azimuth_at_aos_deg"],
+            uplink_capable=row["uplink_capable"],
         )
         for row in rows
     ]
