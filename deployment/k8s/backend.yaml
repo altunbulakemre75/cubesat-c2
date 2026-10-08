@@ -55,6 +55,18 @@ spec:
                 secretKeyRef:
                   name: cubesat-secrets
                   key: JWT_SECRET_KEY
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cubesat-secrets
+                  key: REDIS_PASSWORD
+            - name: NATS_USER
+              value: backend
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cubesat-secrets
+                  key: NATS_BACKEND_PASSWORD
           resources:
             requests:
               cpu: "250m"
@@ -71,8 +83,10 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 3
           readinessProbe:
+            # /ready checks DB, NATS and Redis; /health only proves the
+            # process is alive.
             httpGet:
-              path: /health
+              path: /ready
               port: 8000
             initialDelaySeconds: 10
             periodSeconds: 10

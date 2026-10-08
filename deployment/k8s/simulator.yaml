@@ -33,6 +33,13 @@ spec:
                 configMapKeyRef:
                   name: cubesat-config
                   key: NATS_URL
+            - name: SIM_NATS_USER
+              value: groundstation
+            - name: SIM_NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cubesat-secrets
+                  key: NATS_GROUNDSTATION_PASSWORD
             - name: SIM_SATELLITES
               valueFrom:
                 configMapKeyRef:
