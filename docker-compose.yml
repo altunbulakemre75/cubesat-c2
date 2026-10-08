@@ -184,6 +184,10 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # Optional public Cesium Ion token from .env; without it the globe
+        # uses Cesium's bundled offline imagery.
+        VITE_CESIUM_TOKEN: ${VITE_CESIUM_TOKEN:-}
     container_name: cubesat-frontend
     ports:
       - "3000:80"

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { TLEData } from '../api/satellites'
 import type { SatelliteListItem } from '../types'
+import { globeImagery, OFFLINE_IMAGERY_PATH } from '../lib/globeImagery'
 
 let CesiumModule: typeof import('cesium') | null = null
 async function loadCesium() {
@@ -16,7 +17,7 @@ async function loadSatjs() {
   catch { return null }
 }
 
-const CESIUM_TOKEN = import.meta.env.VITE_CESIUM_TOKEN as string | undefined
+const IMAGERY = globeImagery(import.meta.env.VITE_CESIUM_TOKEN as string | undefined)
 
 // Orbit trail: 90-minute lookahead polyline (one LEO orbit)
 const TRAIL_STEP_MIN = 1
@@ -34,15 +35,29 @@ export function CesiumGlobe({ satellites, tles }: Props) {
 
   // ── initial viewer setup ──────────────────────────────────────────────────
   useEffect(() => {
-    if (!CESIUM_TOKEN || !containerRef.current) return
+    if (!containerRef.current) return
     let cancelled = false
 
     void (async () => {
       const Cesium = await loadCesium()
       if (!Cesium || cancelled || !containerRef.current) return
 
-      Cesium.Ion.defaultAccessToken = CESIUM_TOKEN
+      const offlineLayer = () => Cesium.ImageryLayer.fromProviderAsync(
+        Cesium.TileMapServiceImageryProvider.fromUrl(
+          Cesium.buildModuleUrl(OFFLINE_IMAGERY_PATH),
+        ),
+        {},
+      )
+      let baseLayer: import('cesium').ImageryLayer
+      if (IMAGERY.kind === 'ion') {
+        Cesium.Ion.defaultAccessToken = IMAGERY.token
+        baseLayer = Cesium.ImageryLayer.fromWorldImagery({})
+      } else {
+        baseLayer = offlineLayer()
+      }
+      if (cancelled || !containerRef.current) return
       const viewer = new Cesium.Viewer(containerRef.current, {
+        baseLayer,
         terrainProvider: undefined,
         baseLayerPicker: false,
         geocoder: false,
@@ -60,6 +75,16 @@ export function CesiumGlobe({ satellites, tles }: Props) {
       viewer.camera.setView({
         destination: Cesium.Cartesian3.fromDegrees(35.0, 39.0, 18_000_000),
       })
+      if (IMAGERY.kind === 'ion') {
+        // An invalid or revoked Ion token would otherwise leave a black
+        // globe; fall back to the bundled imagery.
+        baseLayer.errorEvent.addEventListener(() => {
+          if (viewer.isDestroyed()) return
+          console.warn('[Globe] Cesium Ion imagery unavailable — using offline imagery')
+          viewer.imageryLayers.remove(baseLayer)
+          viewer.imageryLayers.add(offlineLayer(), 0)
+        })
+      }
       viewerRef.current = viewer
     })()
 
@@ -73,7 +98,6 @@ export function CesiumGlobe({ satellites, tles }: Props) {
 
   // ── satellite entities using CallbackProperty (Cesium recomputes each frame) ─
   useEffect(() => {
-    if (!CESIUM_TOKEN) return
     let cancelled = false
 
     void (async () => {
@@ -176,22 +200,14 @@ export function CesiumGlobe({ satellites, tles }: Props) {
     }
   }, [tles, satellites])
 
-  if (!CESIUM_TOKEN) {
-    return (
-      <div className="flex h-full w-full flex-col items-center justify-center rounded-lg border border-gray-800 bg-gray-900">
-        <div className="text-center">
-          <div className="mb-3 text-5xl">🛰️</div>
-          <p className="text-sm font-semibold text-gray-300">3D Globe Unavailable</p>
-          <p className="mt-1 max-w-xs text-xs text-gray-500">
-            Set <code className="rounded bg-gray-800 px-1 text-yellow-400">VITE_CESIUM_TOKEN</code>{' '}
-            in <code className="rounded bg-gray-800 px-1 text-yellow-400">.env</code>
-          </p>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div ref={containerRef} className="h-full w-full rounded-lg overflow-hidden" style={{ minHeight: 400 }} />
+    <div className="relative h-full w-full">
+      <div ref={containerRef} className="h-full w-full rounded-lg overflow-hidden" style={{ minHeight: 400 }} />
+      {IMAGERY.kind === 'offline' && (
+        <p className="pointer-events-none absolute left-2 top-2 rounded bg-black/60 px-2 py-0.5 font-mono text-[10px] text-gray-400">
+          Offline imagery · set VITE_CESIUM_TOKEN for high resolution
+        </p>
+      )}
+    </div>
   )
 }
