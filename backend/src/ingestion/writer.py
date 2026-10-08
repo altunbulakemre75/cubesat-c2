@@ -168,9 +168,10 @@ class TelemetryWriter:
                 pass
 
     async def _batch_write(self, items: list[tuple[CanonicalTelemetry, Msg]]) -> None:
-        """Auto-register unknown satellites and bulk-insert telemetry rows
-        in one transaction. Two executemany calls instead of 2*N round-trips."""
-        sat_rows = list({(t.satellite_id, t.satellite_id) for t, _ in items})
+        """Bulk-insert telemetry rows in one executemany. Satellites are not
+        auto-registered here: ingestion already dropped frames for
+        unregistered satellites, and creating rows from bus traffic is how
+        phantom satellites appeared in v0.1.0."""
         telem_rows = [
             (
                 t.timestamp, t.satellite_id, t.source, t.sequence,
@@ -183,11 +184,6 @@ class TelemetryWriter:
 
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                await conn.executemany(
-                    "INSERT INTO satellites (id, name) VALUES ($1, $2) "
-                    "ON CONFLICT (id) DO NOTHING",
-                    sat_rows,
-                )
                 await conn.executemany(
                     """
                     INSERT INTO telemetry (

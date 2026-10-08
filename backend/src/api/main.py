@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from src.anomaly.detector import AnomalyDetector
-from src.api.bootstrap import ensure_admin_user
+from src.api.bootstrap import ensure_admin_user, ensure_seed_satellites
 from src.api.routes import anomalies, auth, commands, fdir, passes, satnogs, satellites, stations, telemetry, users
 from src.api.ws import close_shared_nats, router as ws_router
 from src.config import settings
@@ -40,13 +40,14 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     pool = await get_pool()
     await run_migrations(pool)
     await ensure_admin_user(pool)
+    await ensure_seed_satellites(pool, settings.seed_satellites)
 
     nc = await connect_nats()
     js = nc.jetstream()
 
     await ensure_stream(js)
 
-    ingestion = IngestionService(js, protocol="ax25")
+    ingestion = IngestionService(js, protocol="ax25", pool=pool)
     _background_tasks.append(asyncio.create_task(ingestion.run(), name="ingestion"))
 
     # Anomaly detector is shared between writer (per-packet feed) and any

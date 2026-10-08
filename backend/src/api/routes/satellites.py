@@ -178,12 +178,14 @@ async def set_tle(
             detail=f"Invalid TLE: {exc}",
         ) from exc
 
-    # Auto-register satellite if it doesn't exist
     async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO satellites (id, name) VALUES ($1, $1) ON CONFLICT DO NOTHING",
-            satellite_id,
-        )
+        if not await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM satellites WHERE id = $1)", satellite_id,
+        ):
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail=f"Satellite '{satellite_id}' is not registered",
+            )
 
     # Parse epoch from TLE line 1 if not provided
     epoch = body.epoch or _parse_tle_epoch(body.tle_line1)

@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     # in dozens of times per minute should turn this off.
     login_rate_limit_enabled: bool = True
 
+    # Satellites registered at startup — the bundled simulator's fleet in
+    # docker-compose. Telemetry for unregistered satellites is dropped.
+    seed_satellites: list[str] = []
+
     # Reverse proxies allowed to set X-Forwarded-For (IPs, CIDRs or hostnames
     # such as the compose service name "frontend"). Empty = never trust XFF.
     trusted_proxies: list[str] = []

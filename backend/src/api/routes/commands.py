@@ -54,11 +54,13 @@ async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser):
 
     cmd_id = str(uuid.uuid4())
     async with pool.acquire() as conn:
-        # Auto-register satellite if it doesn't exist yet
-        await conn.execute(
-            "INSERT INTO satellites (id, name) VALUES ($1, $1) ON CONFLICT DO NOTHING",
-            body.satellite_id,
-        )
+        if not await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM satellites WHERE id = $1)", body.satellite_id,
+        ):
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail=f"Satellite '{body.satellite_id}' is not registered",
+            )
         row = await conn.fetchrow(
             """
             INSERT INTO commands (

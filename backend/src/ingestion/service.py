@@ -13,12 +13,14 @@ settings are handled in Faz 1.6 (NATS JetStream setup).
 import asyncio
 import logging
 
+import asyncpg
 import nats.js.errors
 from nats.js import JetStreamContext
 from nats.aio.msg import Msg
 
 from src.ingestion.adapters import get_adapter
 from src.ingestion.adapters.base import ProtocolAdapter
+from src.ingestion.registry import SatelliteRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -66,15 +68,20 @@ class IngestionService:
     Run multiple instances for multi-protocol setups.
     """
 
-    def __init__(self, js: JetStreamContext, protocol: str = "ax25") -> None:
+    def __init__(
+        self, js: JetStreamContext, protocol: str = "ax25", *, pool: asyncpg.Pool,
+    ) -> None:
         self._js = js
         self._adapter: ProtocolAdapter = get_adapter(protocol)
+        # Frames name their own satellite; only registered ones get through.
+        self._registry = SatelliteRegistry(pool)
         self._received: int = 0
         self._errors: int = 0
+        self._rejected: int = 0
 
     @property
     def stats(self) -> dict[str, int]:
-        return {"received": self._received, "errors": self._errors}
+        return {"received": self._received, "errors": self._errors, "rejected": self._rejected}
 
     async def run(self) -> None:
         await ensure_stream(self._js)
@@ -105,6 +112,15 @@ class IngestionService:
                 "Decode failed | subject=%s error=%s",
                 msg.subject,
                 exc,
+            )
+            await msg.ack()
+            return
+
+        if not await self._registry.is_registered(canonical.satellite_id):
+            self._rejected += 1
+            logger.warning(
+                "Frame for unregistered satellite dropped | sat=%s subject=%s",
+                canonical.satellite_id, msg.subject,
             )
             await msg.ack()
             return

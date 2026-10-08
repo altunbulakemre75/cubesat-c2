@@ -134,6 +134,9 @@ services:
       # X-Forwarded-For (login rate limiting keys on the client IP).
       - TRUSTED_PROXIES=["frontend"]
       - LOGIN_RATE_LIMIT_ENABLED=${LOGIN_RATE_LIMIT_ENABLED:-true}
+      # Telemetry is only accepted for registered satellites; register the
+      # simulator's fleet so a fresh stack shows data immediately.
+      - SEED_SATELLITES=["CUBESAT1","CUBESAT2","CUBESAT3"]
       - DEBUG=${DEBUG:-false}
       - LOG_LEVEL=INFO
     volumes:

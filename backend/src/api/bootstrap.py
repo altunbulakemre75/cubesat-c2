@@ -75,3 +75,17 @@ async def ensure_admin_user(pool: asyncpg.Pool) -> None:
         logger.warning("   The user is flagged must_change_password=TRUE.")
         logger.warning("   Read the file, log in, change the password, then 'rm' the file.")
         logger.warning(banner)
+
+
+async def ensure_seed_satellites(pool: asyncpg.Pool, satellite_ids: list[str]) -> None:
+    """Register satellites named in SEED_SATELLITES (the bundled simulator's
+    fleet). Telemetry is only accepted for registered satellites, so without
+    this a fresh docker-compose stack would drop every simulated frame."""
+    if not satellite_ids:
+        return
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            "INSERT INTO satellites (id, name) VALUES ($1, $1) ON CONFLICT (id) DO NOTHING",
+            [(sat_id,) for sat_id in satellite_ids],
+        )
+    logger.info("Seed satellites ensured: %s", ", ".join(satellite_ids))
