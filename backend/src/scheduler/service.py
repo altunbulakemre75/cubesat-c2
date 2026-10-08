@@ -30,11 +30,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import uuid
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
 from nats.js import JetStreamContext
+from nats.js.api import ConsumerConfig, DeliverPolicy
 
 from src.commands.models import CommandStatus, MAX_RETRIES, UNSAFE_RETRY_TYPES
 
@@ -52,6 +52,14 @@ def _cmd_subject(satellite_id: str) -> str:
 
 def _ack_subject_pattern() -> str:
     return "commands.ack.>"
+
+
+_STREAM = "cubesat"
+# One durable consumer that survives restarts, so ACKs that arrive while the
+# backend is down are still processed afterwards. v0.1.0 used
+# "scheduler-ack-<random>" per start: consumers accumulated in JetStream and
+# each new one replayed the stream's whole ACK history.
+_ACK_DURABLE = "scheduler-ack"
 
 
 class CommandScheduler:
@@ -241,12 +249,16 @@ class CommandScheduler:
         Expected payload: {"command_id": "<uuid>", "ok": true|false, "error": "..."}
         Subject: commands.ack.{satellite_id}
         """
-        durable = "scheduler-ack-" + uuid.uuid4().hex[:8]
+        await self._remove_legacy_ack_consumers()
+        durable = _ACK_DURABLE
         try:
             sub = await self._js.subscribe(
                 _ack_subject_pattern(),
                 durable=durable,
                 manual_ack=True,
+                # Only applies when the consumer is first created: start from
+                # now instead of replaying every ACK ever recorded.
+                config=ConsumerConfig(deliver_policy=DeliverPolicy.NEW),
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("Ack listener subscribe failed: %s", exc)
@@ -255,7 +267,26 @@ class CommandScheduler:
         logger.info("Ack listener subscribed to %s (durable=%s)",
                     _ack_subject_pattern(), durable)
 
-        async for msg in sub.messages:
+        try:
+            await self._consume_acks(sub)
+        finally:
+            # Release the durable so a restarted listener can bind again.
+            try:
+                await sub.unsubscribe()
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def _remove_legacy_ack_consumers(self) -> None:
+        try:
+            for info in await self._js.consumers_info(_STREAM):
+                if info.name.startswith(_ACK_DURABLE + "-"):
+                    await self._js.delete_consumer(_STREAM, info.name)
+                    logger.info("Removed legacy ACK consumer %s", info.name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Legacy ACK consumer cleanup failed: %s", exc)
+
+    async def _consume_acks(self, sub: object) -> None:
+        async for msg in sub.messages:  # type: ignore[attr-defined]
             try:
                 data = json.loads(msg.data.decode())
             except Exception as exc:  # noqa: BLE001

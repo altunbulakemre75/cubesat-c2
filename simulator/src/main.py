@@ -2,6 +2,7 @@ import asyncio
 import logging
 import signal
 
+from src.commands import run_command_listener
 from src.config import SimulatorConfig
 from src.publisher import connect_with_retry, run_satellite
 from src.satellite import CubeSat
@@ -34,6 +35,10 @@ async def main() -> None:
         )
         for sat_id in config.satellite_ids
     ]
+
+    # Each satellite also answers its uplink queue (commands.<id>) with ACKs.
+    for sat in satellites:
+        await run_command_listener(nc, js, sat)
 
     tasks = [
         asyncio.create_task(run_satellite(js, sat, config.interval_s), name=sat.satellite_id)
