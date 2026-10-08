@@ -51,6 +51,16 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: list[str] = ["http://localhost:3000"]
 
+    # Login brute-force protection. Independent of DEBUG on purpose: the
+    # default docker-compose runs with DEBUG=true, and tying the two together
+    # left every out-of-the-box install unprotected. Only E2E suites that log
+    # in dozens of times per minute should turn this off.
+    login_rate_limit_enabled: bool = True
+
+    # Reverse proxies allowed to set X-Forwarded-For (IPs, CIDRs or hostnames
+    # such as the compose service name "frontend"). Empty = never trust XFF.
+    trusted_proxies: list[str] = []
+
     @model_validator(mode="after")
     def _validate_jwt_secret(self) -> "Settings":
         """

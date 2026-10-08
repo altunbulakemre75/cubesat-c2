@@ -107,39 +107,81 @@ async def test_distinct_ip_users_get_separate_counters():
 
 
 @pytest.mark.asyncio
-async def test_debug_mode_bypasses_rate_limit():
-    """In dev/test the auto-login fires constantly — bypassing rate limit
-    when DEBUG=true keeps the dev workflow usable. Production must NOT set
-    DEBUG=true (config.py validates this)."""
+async def test_debug_mode_does_not_disable_rate_limit():
+    """The default docker-compose runs with DEBUG=true, so tying the bypass
+    to DEBUG left every out-of-the-box install without brute-force
+    protection. Only the explicit flag may disable it."""
     fake = MagicMock()
-    fake.incr = AsyncMock(return_value=999)  # would normally trigger
+    fake.incr = AsyncMock(return_value=999)
     fake.expire = AsyncMock()
-    with patch("src.api.rate_limit.settings.debug", True), \
-         patch("src.api.rate_limit.redis_client.get_client", return_value=fake):
+    with patch("src.api.rate_limit.settings.debug", True),          patch("src.api.rate_limit.redis_client.get_client", return_value=fake):
         ok = await check_login_rate(_request(), "alice")
-    assert ok is True
-    fake.incr.assert_not_called()  # we should short-circuit BEFORE Redis
+    assert ok is False
 
 
 @pytest.mark.asyncio
-async def test_x_forwarded_for_used_when_present():
-    """Behind a reverse proxy, request.client.host is the proxy. The real
-    client IP comes from X-Forwarded-For. Our key MUST reflect that."""
+async def test_explicit_flag_disables_rate_limit_without_touching_redis():
     fake = MagicMock()
-    captured = {}
+    fake.incr = AsyncMock(return_value=999)
+    fake.delete = AsyncMock()
+    with patch("src.api.rate_limit.settings.login_rate_limit_enabled", False),          patch("src.api.rate_limit.redis_client.get_client", return_value=fake):
+        assert await check_login_rate(_request(), "alice") is True
+        await reset_login_rate(_request(), "alice")
+    fake.incr.assert_not_called()
+    fake.delete.assert_not_called()
 
-    async def fake_incr(key):
+
+async def _key_for(req: MagicMock, trusted: list[str]) -> str:
+    fake = MagicMock()
+    captured: dict[str, str] = {}
+
+    async def fake_incr(key: str) -> int:
         captured["key"] = key
         return 1
     fake.incr = fake_incr
     fake.expire = AsyncMock()
-
-    req = _request("10.0.0.1")  # the proxy
-    req.headers = {"x-forwarded-for": "203.0.113.7, 10.0.0.1"}
-
-    with patch("src.api.rate_limit.settings.debug", False), \
-         patch("src.api.rate_limit.redis_client.get_client", return_value=fake):
+    with patch("src.api.rate_limit.settings.trusted_proxies", trusted),          patch("src.api.rate_limit.redis_client.get_client", return_value=fake):
         await check_login_rate(req, "alice")
+    return captured["key"]
 
-    assert "203.0.113.7" in captured["key"]
-    assert "10.0.0.1" not in captured["key"]
+
+@pytest.mark.asyncio
+async def test_x_forwarded_for_ignored_when_peer_is_not_a_trusted_proxy():
+    """A client talking to the backend directly can put anything in XFF.
+    Trusting it let an attacker rotate the header to get unlimited tries."""
+    req = _request("198.51.100.20")
+    req.headers = {"x-forwarded-for": "203.0.113.7"}
+    key = await _key_for(req, trusted=[])
+    assert "198.51.100.20" in key
+    assert "203.0.113.7" not in key
+
+
+@pytest.mark.asyncio
+async def test_x_forwarded_for_used_when_peer_is_a_trusted_proxy():
+    req = _request("10.0.0.1")
+    req.headers = {"x-forwarded-for": "203.0.113.7"}
+    key = await _key_for(req, trusted=["10.0.0.0/8"])
+    assert "203.0.113.7" in key
+
+
+@pytest.mark.asyncio
+async def test_spoofed_prefix_in_x_forwarded_for_is_ignored():
+    """nginx appends the real peer to whatever XFF the client sent, so the
+    client controls every entry left of the proxy's own. The rightmost
+    untrusted entry is the only one we can believe."""
+    req = _request("10.0.0.1")
+    req.headers = {"x-forwarded-for": "6.6.6.6, 203.0.113.7"}
+    key = await _key_for(req, trusted=["10.0.0.1"])
+    assert "203.0.113.7" in key
+    assert "6.6.6.6" not in key
+
+
+@pytest.mark.asyncio
+async def test_trusted_proxy_given_by_hostname():
+    """In docker-compose the proxy's IP is assigned at runtime, so the
+    setting accepts a service name and resolves it."""
+    req = _request("172.20.0.5")
+    req.headers = {"x-forwarded-for": "203.0.113.7"}
+    with patch("src.api.rate_limit._resolve_host", new=AsyncMock(return_value={"172.20.0.5"})):
+        key = await _key_for(req, trusted=["frontend"])
+    assert "203.0.113.7" in key
