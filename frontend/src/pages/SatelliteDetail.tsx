@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { clsx } from 'clsx'
@@ -61,6 +61,13 @@ function TelemetryTab({ satelliteId }: { satelliteId: string }) {
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   })
+
+  // Seed the live window with history so charts start full and keep
+  // growing as WebSocket points arrive.
+  const mergeTelemetryHistory = useAppStore((s) => s.mergeTelemetryHistory)
+  useEffect(() => {
+    if (initialPoints) mergeTelemetryHistory(satelliteId, initialPoints)
+  }, [initialPoints, satelliteId, mergeTelemetryHistory])
 
   const displayPoints =
     telemetryWindow.length > 0 ? telemetryWindow : (initialPoints ?? [])

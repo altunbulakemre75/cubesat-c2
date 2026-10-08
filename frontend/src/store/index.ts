@@ -30,6 +30,8 @@ interface AppState {
   telemetryWindows: Record<string, TelemetryPoint[]>
   pushTelemetryPoint: (point: TelemetryPoint) => void
   initTelemetryWindow: (satelliteId: string, points: TelemetryPoint[]) => void
+  // History from REST joined with whatever live WS points already arrived.
+  mergeTelemetryHistory: (satelliteId: string, points: TelemetryPoint[]) => void
 
   // Active alerts (critical/warning events not yet dismissed)
   activeAlerts: AppEvent[]
@@ -86,6 +88,22 @@ export const useAppStore = create<AppState>((set) => ({
         [satelliteId]: points.slice(-MAX_TELEMETRY_POINTS),
       },
     })),
+  mergeTelemetryHistory: (satelliteId, points) =>
+    set((state) => {
+      const byKey = new Map<string, TelemetryPoint>()
+      for (const p of [...points, ...(state.telemetryWindows[satelliteId] ?? [])]) {
+        byKey.set(`${p.timestamp}|${p.sequence}`, p)
+      }
+      const merged = [...byKey.values()].sort(
+        (a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp),
+      )
+      return {
+        telemetryWindows: {
+          ...state.telemetryWindows,
+          [satelliteId]: merged.slice(-MAX_TELEMETRY_POINTS),
+        },
+      }
+    }),
 
   activeAlerts: [],
   dismissAlert: (id) =>
