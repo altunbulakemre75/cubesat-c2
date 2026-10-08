@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, status
 
+from src.api.audit import log_action
 from src.api.deps import CurrentUser, Pool
 from src.api.rbac import Role, require_role
 
@@ -50,6 +51,9 @@ async def create_station(body: StationCreate, pool: Pool, user: CurrentUser):
             body.name, body.satnogs_id, body.latitude_deg,
             body.longitude_deg, body.elevation_m, body.min_elevation_deg,
         )
+    await log_action(pool, user["username"], "station.create",
+                     target_id=str(row["id"]), target_type="ground_station",
+                     details={"name": body.name})
     return StationOut(**dict(row))
 
 
@@ -62,3 +66,5 @@ async def delete_station(station_id: int, pool: Pool, user: CurrentUser):
         )
     if result == "UPDATE 0":
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Station not found")
+    await log_action(pool, user["username"], "station.delete",
+                     target_id=str(station_id), target_type="ground_station")
