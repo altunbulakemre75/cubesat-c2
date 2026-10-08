@@ -12,6 +12,7 @@ GET  /satnogs/observations?satellite_id=...&limit=20
     background fetcher. This is REAL satellite telemetry (amateur cubesats).
 """
 
+import json
 import logging
 from datetime import datetime
 from typing import Any
@@ -37,6 +38,20 @@ class SatnogsObservationOut(BaseModel):
     frame_hex: str | None
     decoded_json: dict[str, Any] | None
     app_source: str | None
+
+def _as_object(value: Any) -> dict[str, Any] | None:
+    """decoded_json as a dict. Rows written before migration 010 (or by an
+    older replica during a rolling upgrade) may hold a JSON string."""
+    if value is None or isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return {"raw": value}
+        return parsed if isinstance(parsed, dict) else {"value": parsed}
+    return {"value": value}
+
 
 # Pre-defined bounding boxes (lat_min, lat_max, lon_min, lon_max)
 _BBOX_SCOPES = {
@@ -268,7 +283,7 @@ async def list_observations(
             transmitter=r["transmitter"],
             timestamp_utc=r["timestamp_utc"],
             frame_hex=r["frame_hex"],
-            decoded_json=r["decoded_json"],
+            decoded_json=_as_object(r["decoded_json"]),
             app_source=r["app_source"],
         )
         for r in rows

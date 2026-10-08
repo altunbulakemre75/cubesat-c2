@@ -13,7 +13,6 @@ network in the test process.
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -156,7 +155,9 @@ async def test_poll_one_inserts_observations_and_skips_timestampless():
     assert rows[0][2] == "GS-425"
     assert rows[1][2] == "GS-427"
     # decoded_json carries the full metadata under known keys
-    meta_0 = json.loads(rows[0][6])
+    # (a dict, not a JSON string — asyncpg's JSONB codec serializes it)
+    meta_0 = rows[0][6]
+    assert isinstance(meta_0, dict)
     assert meta_0["observation_id"] == 9001
     assert meta_0["ground_station"] == 425
     assert meta_0["vetted_status"] == "good"

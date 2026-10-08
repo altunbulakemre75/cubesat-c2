@@ -166,7 +166,7 @@ class SatnogsTelemetryFetcher:
                     o.get("transmitter"),
                     ts,
                     None,                     # network endpoint has no raw frame
-                    json.dumps(meta),
+                    meta,  # a dict: the pool's JSONB codec serializes it
                     "network",
                 ))
             except Exception as exc:  # noqa: BLE001
