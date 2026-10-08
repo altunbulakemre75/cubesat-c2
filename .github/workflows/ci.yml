@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege for the GITHUB_TOKEN: no job writes to the repository
+# (CodeQL: actions/missing-workflow-permissions).
+permissions:
+  contents: read
+
 jobs:
   test-backend:
     runs-on: ubuntu-latest
