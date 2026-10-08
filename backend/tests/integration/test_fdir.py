@@ -59,7 +59,9 @@ def _telemetry(db: Db, age: timedelta, battery: float = 3.9) -> None:
     )
 
 
-def _own_station_pass(db: Db, ended_ago: timedelta, length: timedelta = timedelta(minutes=8)) -> None:
+def _own_station_pass(
+    db: Db, ended_ago: timedelta, length: timedelta = timedelta(minutes=8),
+) -> None:
     db.execute(
         "INSERT INTO ground_stations (id, name, latitude_deg, longitude_deg, uplink_capable) "
         "VALUES (1, 'Club GS', 39.9, 32.8, TRUE) ON CONFLICT DO NOTHING"

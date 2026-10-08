@@ -16,11 +16,10 @@ Fix: enforce a minimum safe_recovery_s so the state is stable for at least
 one FDIR cycle.
 """
 
-import time
 
 import pytest
 
-from src.satellite import CubeSat, SatelliteMode
+from src.satellite import CubeSat
 
 
 def test_safe_recovery_has_minimum_duration():

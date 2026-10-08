@@ -114,7 +114,8 @@ async def test_debug_mode_does_not_disable_rate_limit():
     fake = MagicMock()
     fake.incr = AsyncMock(return_value=999)
     fake.expire = AsyncMock()
-    with patch("src.api.rate_limit.settings.debug", True),          patch("src.api.rate_limit.redis_client.get_client", return_value=fake):
+    with patch("src.api.rate_limit.settings.debug", True), \
+         patch("src.api.rate_limit.redis_client.get_client", return_value=fake):
         ok = await check_login_rate(_request(), "alice")
     assert ok is False
 
@@ -124,7 +125,8 @@ async def test_explicit_flag_disables_rate_limit_without_touching_redis():
     fake = MagicMock()
     fake.incr = AsyncMock(return_value=999)
     fake.delete = AsyncMock()
-    with patch("src.api.rate_limit.settings.login_rate_limit_enabled", False),          patch("src.api.rate_limit.redis_client.get_client", return_value=fake):
+    with patch("src.api.rate_limit.settings.login_rate_limit_enabled", False), \
+         patch("src.api.rate_limit.redis_client.get_client", return_value=fake):
         assert await check_login_rate(_request(), "alice") is True
         await reset_login_rate(_request(), "alice")
     fake.incr.assert_not_called()
@@ -140,7 +142,8 @@ async def _key_for(req: MagicMock, trusted: list[str]) -> str:
         return 1
     fake.incr = fake_incr
     fake.expire = AsyncMock()
-    with patch("src.api.rate_limit.settings.trusted_proxies", trusted),          patch("src.api.rate_limit.redis_client.get_client", return_value=fake):
+    with patch("src.api.rate_limit.settings.trusted_proxies", trusted), \
+         patch("src.api.rate_limit.redis_client.get_client", return_value=fake):
         await check_login_rate(req, "alice")
     return captured["key"]
 

@@ -100,7 +100,9 @@ def _rejected(client: TestClient, url: str) -> int:
     return exc.value.code
 
 
-def test_ticket_opens_the_telemetry_stream(client: TestClient, db: Db, fake_js: _FakeJetStream) -> None:
+def test_ticket_opens_the_telemetry_stream(
+    client: TestClient, db: Db, fake_js: _FakeJetStream,
+) -> None:
     db.create_user("ann", PW, "viewer")
     ticket = _ticket(client, login(client, "ann", PW)["access_token"])
 

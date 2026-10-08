@@ -198,7 +198,10 @@ class SatNOGSClient:
                 resp = await self._http.get(url, params=params)
                 if resp.status_code in _RETRY_STATUSES:
                     wait = 2 ** attempt
-                    logger.warning("SatNOGS %s — retrying in %ds (attempt %d)", resp.status_code, wait, attempt)
+                    logger.warning(
+                        "SatNOGS %s — retrying in %ds (attempt %d)",
+                        resp.status_code, wait, attempt,
+                    )
                     await asyncio.sleep(wait)
                     continue
                 resp.raise_for_status()

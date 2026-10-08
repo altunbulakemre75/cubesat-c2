@@ -111,7 +111,8 @@ def test_empty_env_var_does_not_mask_a_secret_file(monkeypatch: pytest.MonkeyPat
     # compose passes POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-} so an operator
     # can override; unset must fall through to the generated secret.
     monkeypatch.setenv("POSTGRES_PASSWORD", "")
-    monkeypatch.setenv("CUBESAT_SECRETS_DIR", str(_secrets(tmp_path, postgres_password="from-file")))
+    secrets_dir = _secrets(tmp_path, postgres_password="from-file")
+    monkeypatch.setenv("CUBESAT_SECRETS_DIR", str(secrets_dir))
     s = _reload_settings()
     assert s.postgres_password == "from-file"
 
@@ -119,7 +120,8 @@ def test_empty_env_var_does_not_mask_a_secret_file(monkeypatch: pytest.MonkeyPat
 def test_explicit_env_var_overrides_the_secret_file(monkeypatch: pytest.MonkeyPatch, tmp_path):
     # Upgrade path: an existing database volume keeps its old password.
     monkeypatch.setenv("POSTGRES_PASSWORD", "legacy-password")
-    monkeypatch.setenv("CUBESAT_SECRETS_DIR", str(_secrets(tmp_path, postgres_password="from-file")))
+    secrets_dir = _secrets(tmp_path, postgres_password="from-file")
+    monkeypatch.setenv("CUBESAT_SECRETS_DIR", str(secrets_dir))
     s = _reload_settings()
     assert s.postgres_password == "legacy-password"
 

@@ -80,7 +80,8 @@ class CelestrakRefresher:
             satellites = await conn.fetch(
                 """
                 SELECT s.id, s.norad_id,
-                       (SELECT MAX(epoch) FROM tle_history h WHERE h.satellite_id = s.id) AS latest_epoch
+                       (SELECT MAX(epoch) FROM tle_history h
+                         WHERE h.satellite_id = s.id) AS latest_epoch
                 FROM satellites s
                 WHERE s.active = TRUE AND s.norad_id IS NOT NULL
                 """

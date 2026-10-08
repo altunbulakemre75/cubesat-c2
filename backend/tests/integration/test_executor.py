@@ -172,7 +172,8 @@ def test_late_ack_after_a_retry_was_scheduled_is_recorded(db: Db, test_dsn: str)
     # after our timeout. Recording it prevents a pointless retransmission.
     cmd = _due(db)
     db.execute(
-        "UPDATE commands SET status = 'scheduled', retry_count = 1, sent_at = NOW() - interval '70 seconds' "
+        "UPDATE commands SET status = 'scheduled', retry_count = 1, "
+        "sent_at = NOW() - interval '70 seconds' "
         "WHERE id = $1::uuid", cmd,
     )
 

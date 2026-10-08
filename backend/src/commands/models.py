@@ -33,7 +33,9 @@ class CommandStatus(str, Enum):
 _TRANSITIONS: dict[CommandStatus, set[CommandStatus]] = {
     CommandStatus.AWAITING_APPROVAL: {CommandStatus.PENDING, CommandStatus.DEAD},
     CommandStatus.PENDING: {CommandStatus.SCHEDULED, CommandStatus.DEAD},
-    CommandStatus.SCHEDULED: {CommandStatus.TRANSMITTING, CommandStatus.PENDING, CommandStatus.DEAD},
+    CommandStatus.SCHEDULED: {
+        CommandStatus.TRANSMITTING, CommandStatus.PENDING, CommandStatus.DEAD,
+    },
     CommandStatus.TRANSMITTING: {CommandStatus.SENT, CommandStatus.TIMEOUT},
     # SENT → DEAD: the satellite NACKed the command (retrying can't help).
     CommandStatus.SENT: {CommandStatus.ACKED, CommandStatus.TIMEOUT, CommandStatus.DEAD},

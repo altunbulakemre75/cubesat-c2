@@ -60,7 +60,10 @@ def _eci_to_geodetic(x: float, y: float, z: float, t: datetime) -> tuple[float, 
         lat = math.atan2(z_ecef + e2 * N * sin_lat, p)
     sin_lat = math.sin(lat)
     N = a / math.sqrt(1 - e2 * sin_lat**2)
-    alt = p / math.cos(lat) - N if abs(math.cos(lat)) > 1e-9 else abs(z_ecef) / abs(sin_lat) - N * (1 - e2)
+    if abs(math.cos(lat)) > 1e-9:
+        alt = p / math.cos(lat) - N
+    else:  # at the poles
+        alt = abs(z_ecef) / abs(sin_lat) - N * (1 - e2)
 
     return math.degrees(lat), math.degrees(lon), alt
 

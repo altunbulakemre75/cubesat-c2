@@ -1,7 +1,5 @@
 import time
 
-import pytest
-
 from src.satellite import CubeSat, SatelliteMode
 
 
@@ -30,8 +28,12 @@ def test_telemetry_values_within_physical_bounds():
     for _ in range(200):
         tm = sat.tick()
         assert 3.3 <= tm.battery_voltage_v <= 4.2, f"battery out of range: {tm.battery_voltage_v}"
-        assert -30.0 <= tm.temperature_obcs_c <= 70.0, f"obcs temp out of range: {tm.temperature_obcs_c}"
-        assert -40.0 <= tm.temperature_eps_c <= 60.0, f"eps temp out of range: {tm.temperature_eps_c}"
+        assert -30.0 <= tm.temperature_obcs_c <= 70.0, (
+            f"obcs temp out of range: {tm.temperature_obcs_c}"
+        )
+        assert -40.0 <= tm.temperature_eps_c <= 60.0, (
+            f"eps temp out of range: {tm.temperature_eps_c}"
+        )
         assert 0.0 <= tm.solar_power_w <= 7.0, f"solar power out of range: {tm.solar_power_w}"
         assert -120.0 <= tm.rssi_dbm <= -80.0, f"rssi out of range: {tm.rssi_dbm}"
         assert tm.uptime_s >= 0

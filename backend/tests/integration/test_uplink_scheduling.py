@@ -32,7 +32,8 @@ def _schedule_once(dsn: str) -> None:
 
 def _station(db: Db, station_id: int, *, uplink: bool, satnogs_id: int | None = None) -> None:
     db.execute(
-        "INSERT INTO ground_stations (id, name, satnogs_id, latitude_deg, longitude_deg, uplink_capable) "
+        "INSERT INTO ground_stations "
+        "(id, name, satnogs_id, latitude_deg, longitude_deg, uplink_capable) "
         "VALUES ($1, $2, $3, 39.9, 32.8, $4)",
         station_id, f"GS{station_id}", satnogs_id, uplink,
     )
@@ -41,7 +42,8 @@ def _station(db: Db, station_id: int, *, uplink: bool, satnogs_id: int | None = 
 def _pass(db: Db, station_id: int, aos_in_min: float, los_in_min: float) -> None:
     db.execute(
         "INSERT INTO pass_schedule (satellite_id, station_id, aos, los, max_elevation_deg) "
-        "VALUES ('SAT1', $1, NOW() + make_interval(secs => $2), NOW() + make_interval(secs => $3), 40)",
+        "VALUES ('SAT1', $1, NOW() + make_interval(secs => $2), "
+        "NOW() + make_interval(secs => $3), 40)",
         station_id, aos_in_min * 60, los_in_min * 60,
     )
 

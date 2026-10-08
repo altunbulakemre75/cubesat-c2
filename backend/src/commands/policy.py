@@ -62,6 +62,7 @@ def evaluate(command_type: str, satellite_mode: SatelliteMode) -> PolicyDecision
 
     return PolicyDecision(
         False,
-        f"Command '{command_type}' is not permitted when satellite is in '{satellite_mode.value}' mode. "
+        f"Command '{command_type}' is not permitted when satellite is in "
+        f"'{satellite_mode.value}' mode. "
         f"Allowed commands: {sorted(allowed)}",
     )

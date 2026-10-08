@@ -94,7 +94,8 @@ class CommandScheduler:
 
     async def run(self) -> None:
         logger.info(
-            "CommandScheduler started (schedule=%.1fs, execute=%.1fs, timeout=%.1fs, ack_timeout=%.0fs)",
+            "CommandScheduler started (schedule=%.1fs, execute=%.1fs, timeout=%.1fs, "
+            "ack_timeout=%.0fs)",
             _SCHEDULE_INTERVAL_S, _EXECUTE_INTERVAL_S, _TIMEOUT_INTERVAL_S, ACK_TIMEOUT_S,
         )
         await asyncio.gather(

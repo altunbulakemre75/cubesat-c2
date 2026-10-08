@@ -18,8 +18,10 @@ async def test_get_stations_returns_list():
     respx.get(f"{NETWORK_BASE}/stations/").mock(return_value=httpx.Response(
         200,
         json=[
-            {"id": 1, "name": "Ankara GS", "lat": 39.9, "lng": 32.8, "altitude": 938, "status": "Online"},
-            {"id": 2, "name": "Istanbul GS", "lat": 41.0, "lng": 28.9, "altitude": 100, "status": "Online"},
+            {"id": 1, "name": "Ankara GS", "lat": 39.9, "lng": 32.8,
+             "altitude": 938, "status": "Online"},
+            {"id": 2, "name": "Istanbul GS", "lat": 41.0, "lng": 28.9,
+             "altitude": 100, "status": "Online"},
         ],
     ))
     client = SatNOGSClient()

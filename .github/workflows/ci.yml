@@ -42,11 +42,7 @@ jobs:
 
       - name: Lint (ruff)
         working-directory: backend
-        # Don't fail the build on lint warnings yet — surface them as
-        # annotations and tighten the rule set in a follow-up.
-        run: |
-          pip install ruff
-          ruff check src tests --output-format=github || true
+        run: ruff check src tests --output-format=github
 
       - name: Start NATS with the repo's ACLs
         # Service containers start before checkout, so they can't mount the
@@ -86,6 +82,10 @@ jobs:
       - name: Install simulator deps
         working-directory: simulator
         run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        working-directory: simulator
+        run: ruff check src tests --output-format=github
 
       - name: Run simulator tests
         working-directory: simulator

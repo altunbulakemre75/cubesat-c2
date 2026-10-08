@@ -44,7 +44,6 @@ class TestDecode:
         assert ct.satellite_id == "CUBESAT1"
 
     def test_uses_apid_when_satellite_id_missing(self):
-        payload = json.dumps(_valid_payload(satellite_id=None)).encode()
         # Remove the key so the fallback kicks in
         d = _valid_payload()
         del d["satellite_id"]

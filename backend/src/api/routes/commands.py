@@ -85,7 +85,8 @@ async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser, res
                 body.params if body.params else {},
                 body.priority, body.safe_retry, body.idempotency_key,
                 user["username"], body.scheduled_at,
-                (CommandStatus.AWAITING_APPROVAL if needs_approval else CommandStatus.PENDING).value,
+                (CommandStatus.AWAITING_APPROVAL if needs_approval
+                 else CommandStatus.PENDING).value,
                 body.scheduled_at is not None,
             )
     except asyncpg.UniqueViolationError:
@@ -352,7 +353,9 @@ async def cancel_command(command_id: str, pool: Pool, user: CurrentUser):
             command_id,
         )
     if result == "UPDATE 0":
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Command not found or not cancellable")
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Command not found or not cancellable",
+        )
 
     await log_action(
         pool, user["username"], "command.cancel",

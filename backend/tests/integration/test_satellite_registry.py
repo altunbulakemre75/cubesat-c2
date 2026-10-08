@@ -37,7 +37,8 @@ def _frame(satellite_id: str) -> bytes:
         "temperature_obcs_c": 20.0, "temperature_eps_c": 18.0, "solar_power_w": 1.0,
         "rssi_dbm": -90.0, "uptime_s": 10, "mode": "nominal",
     }
-    return callsign("GROUND", False) + callsign("CUBSAT", True) + b"\x03\xf0" + json.dumps(payload).encode()
+    header = callsign("GROUND", False) + callsign("CUBSAT", True) + b"\x03\xf0"
+    return header + json.dumps(payload).encode()
 
 
 class _Msg:

@@ -123,13 +123,21 @@ def test_rejects_wrong_pid_byte():
 
 
 def test_rejects_non_utf8_info():
-    header = _encode_callsign("GROUND", last=False) + _encode_callsign("CUBSAT", last=True) + b"\x03\xf0"
+    header = (
+        _encode_callsign("GROUND", last=False)
+        + _encode_callsign("CUBSAT", last=True)
+        + b"\x03\xf0"
+    )
     with pytest.raises(ValueError, match="UTF-8"):
         adapter.decode(header + b"\xff\xfe invalid")
 
 
 def test_rejects_invalid_json():
-    header = _encode_callsign("GROUND", last=False) + _encode_callsign("CUBSAT", last=True) + b"\x03\xf0"
+    header = (
+        _encode_callsign("GROUND", last=False)
+        + _encode_callsign("CUBSAT", last=True)
+        + b"\x03\xf0"
+    )
     with pytest.raises(ValueError, match="JSON"):
         adapter.decode(header + b"not-json-at-all")
 

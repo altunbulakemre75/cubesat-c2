@@ -47,7 +47,10 @@ class AX25Adapter(ProtocolAdapter):
         if len(raw) <= _HEADER_LEN:
             raise ValueError(f"AX.25 frame too short: {len(raw)} bytes (min {_HEADER_LEN + 1})")
         if raw[14] != _CONTROL_UI:
-            raise ValueError(f"Not a UI frame: control byte is 0x{raw[14]:02X}, expected 0x{_CONTROL_UI:02X}")
+            raise ValueError(
+                f"Not a UI frame: control byte is 0x{raw[14]:02X}, "
+                f"expected 0x{_CONTROL_UI:02X}"
+            )
         if raw[15] != _PID_NO_L3:
             raise ValueError(f"Unexpected PID byte: 0x{raw[15]:02X}, expected 0x{_PID_NO_L3:02X}")
 

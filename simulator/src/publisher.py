@@ -36,7 +36,8 @@ async def run_satellite(
                 telemetry.battery_voltage_v,
             )
         except nats.errors.TimeoutError:
-            logger.warning("NATS publish timeout | sat=%s seq=%d", telemetry.satellite_id, telemetry.sequence)
+            logger.warning("NATS publish timeout | sat=%s seq=%d",
+                           telemetry.satellite_id, telemetry.sequence)
         except Exception as exc:  # noqa: BLE001
             logger.error("NATS publish error | sat=%s: %s", telemetry.satellite_id, exc)
 
@@ -59,7 +60,8 @@ async def connect_with_retry(config: SimulatorConfig, max_attempts: int = 10) ->
             return nc
         except Exception as exc:  # noqa: BLE001
             wait = min(2 ** attempt, 30)
-            logger.warning("NATS connection failed (attempt %d/%d): %s — retrying in %ds", attempt, max_attempts, exc, wait)
+            logger.warning("NATS connection failed (attempt %d/%d): %s — retrying in %ds",
+                           attempt, max_attempts, exc, wait)
             await asyncio.sleep(wait)
 
     raise RuntimeError(f"Could not connect to NATS at {nats_url} after {max_attempts} attempts")

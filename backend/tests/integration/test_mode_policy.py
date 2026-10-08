@@ -94,7 +94,8 @@ class _CapturingJetStream:
 def _due_command(db: Db, command_type: str) -> str:
     cmd_id = str(uuid.uuid4())
     db.execute(
-        "INSERT INTO commands (id, satellite_id, command_type, status, scheduled_at, scheduled_manually) "
+        "INSERT INTO commands (id, satellite_id, command_type, status, scheduled_at, "
+        "scheduled_manually) "
         "VALUES ($1, 'SAT1', $2, 'scheduled', NOW() - interval '1 second', TRUE)",
         cmd_id, command_type,
     )

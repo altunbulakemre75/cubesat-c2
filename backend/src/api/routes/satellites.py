@@ -3,8 +3,6 @@ import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
-
-logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 from sgp4.api import WGS84, Satrec
 
@@ -15,6 +13,7 @@ from src.api.schemas import SatelliteDetail, SatelliteListItem, TLEResponse
 from src.orbit.passes import GroundStation, predict_passes_multi
 from src.storage.redis_client import get_last_telemetry
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/satellites", tags=["satellites"])
 
 
@@ -98,7 +97,9 @@ async def delete_satellite(satellite_id: str, pool: Pool, user: CurrentUser):
             result = await conn.execute("DELETE FROM satellites WHERE id = $1", satellite_id)
 
     if result == "DELETE 0":
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Satellite '{satellite_id}' not found")
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail=f"Satellite '{satellite_id}' not found",
+        )
 
     await log_action(pool, user["username"], "satellite.delete",
                      target_id=satellite_id, target_type="satellite")
@@ -108,11 +109,14 @@ async def delete_satellite(satellite_id: str, pool: Pool, user: CurrentUser):
 async def get_satellite(satellite_id: str, pool: Pool, user: CurrentUser):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id, name, norad_id, description, active, created_at FROM satellites WHERE id = $1",
+            "SELECT id, name, norad_id, description, active, created_at "
+            "FROM satellites WHERE id = $1",
             satellite_id,
         )
     if not row:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Satellite '{satellite_id}' not found")
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail=f"Satellite '{satellite_id}' not found",
+        )
 
     last = await get_last_telemetry(satellite_id)
     return SatelliteDetail(
@@ -201,7 +205,10 @@ async def set_tle(
         )
 
     # Compute passes in background so the response returns immediately
-    background_tasks.add_task(_compute_and_store_passes, pool, satellite_id, body.tle_line1.strip(), body.tle_line2.strip())
+    background_tasks.add_task(
+        _compute_and_store_passes, pool, satellite_id,
+        body.tle_line1.strip(), body.tle_line2.strip(),
+    )
 
     return TLEResponse(**dict(row))
 

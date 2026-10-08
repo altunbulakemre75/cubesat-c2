@@ -28,7 +28,8 @@ def _pool(row: dict[str, Any] | None) -> MagicMock:
 async def test_cached_reading_is_used_without_touching_the_db() -> None:
     pool = _pool(None)
     cached = ("safe", NOW.isoformat())
-    with patch("src.commands.mode.redis_client.get_satellite_mode", new=AsyncMock(return_value=cached)):
+    with patch("src.commands.mode.redis_client.get_satellite_mode",
+               new=AsyncMock(return_value=cached)):
         reading = await current_mode(pool, "SAT1")
     assert reading == ModeReading(SatelliteMode.SAFE, NOW)
     pool.fetchrow.assert_not_called()
@@ -36,7 +37,8 @@ async def test_cached_reading_is_used_without_touching_the_db() -> None:
 
 async def test_falls_back_to_latest_telemetry_when_cache_is_empty() -> None:
     pool = _pool({"mode": "science", "time": NOW})
-    with patch("src.commands.mode.redis_client.get_satellite_mode", new=AsyncMock(return_value=None)):
+    with patch("src.commands.mode.redis_client.get_satellite_mode",
+               new=AsyncMock(return_value=None)):
         reading = await current_mode(pool, "SAT1")
     assert reading == ModeReading(SatelliteMode.SCIENCE, NOW)
 
@@ -50,7 +52,8 @@ async def test_falls_back_to_the_db_when_redis_is_down() -> None:
 
 
 async def test_no_telemetry_at_all_means_unknown() -> None:
-    with patch("src.commands.mode.redis_client.get_satellite_mode", new=AsyncMock(return_value=None)):
+    with patch("src.commands.mode.redis_client.get_satellite_mode",
+               new=AsyncMock(return_value=None)):
         assert await current_mode(_pool(None), "SAT1") is None
 
 

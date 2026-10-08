@@ -18,7 +18,7 @@ import json
 import logging
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from src.satellite import CubeSat, SatelliteMode
@@ -54,7 +54,7 @@ class CommandExecutor:
         ack: dict[str, Any] = {
             "command_id": command_id,
             "ok": error is None,
-            "executed_at": datetime.now(timezone.utc).isoformat(),
+            "executed_at": datetime.now(UTC).isoformat(),
         }
         if error is not None:
             ack["error"] = error

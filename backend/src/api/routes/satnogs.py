@@ -65,7 +65,7 @@ async def sync_satellite(
     """
     require_role(Role.OPERATOR, user["role"])
 
-    client = SatNOGSClient(api_token=settings.satnogs_api_token if hasattr(settings, "satnogs_api_token") else None)
+    client = SatNOGSClient(api_token=settings.satnogs_api_token)
     try:
         tle = await client.get_tle(norad_id)
     finally:
@@ -88,7 +88,8 @@ async def sync_satellite(
             satellite_id, norad_id,
         )
         await conn.execute(
-            "INSERT INTO tle_history (satellite_id, epoch, tle_line1, tle_line2) VALUES ($1,$2,$3,$4)",
+            "INSERT INTO tle_history (satellite_id, epoch, tle_line1, tle_line2) "
+            "VALUES ($1,$2,$3,$4)",
             satellite_id, epoch, tle1, tle2,
         )
 
