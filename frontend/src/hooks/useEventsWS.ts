@@ -1,77 +1,8 @@
-import { useEffect, useRef, useCallback } from 'react'
-import { WS_BASE_URL } from '../api/client'
 import { useAppStore } from '../store'
 import type { AppEvent } from '../types'
-
-const BASE_DELAY_MS = 1_000
-const MAX_DELAY_MS = 30_000
+import { useTicketedSocket } from './useTicketedSocket'
 
 export function useEventsWS(): void {
   const pushEvent = useAppStore((s) => s.pushEvent)
-  const wsRef = useRef<WebSocket | null>(null)
-  const retryCountRef = useRef(0)
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const mountedRef = useRef(true)
-
-  const connect = useCallback(() => {
-    if (!mountedRef.current) return
-
-    const token = useAppStore.getState().token
-    if (!token) {
-      // No auth — skip WS connection; will retry when a token lands
-      retryTimerRef.current = setTimeout(connect, 2000)
-      return
-    }
-
-    const url = `${WS_BASE_URL}/ws/events?token=${encodeURIComponent(token)}`
-    const ws = new WebSocket(url)
-    wsRef.current = ws
-
-    ws.onopen = () => {
-      retryCountRef.current = 0
-    }
-
-    ws.onmessage = (event: MessageEvent) => {
-      try {
-        const appEvent = JSON.parse(event.data as string) as AppEvent
-        pushEvent(appEvent)
-      } catch {
-        console.warn('[EventsWS] Failed to parse message', event.data)
-      }
-    }
-
-    ws.onerror = () => {
-      // onerror always precedes onclose
-    }
-
-    ws.onclose = (event: CloseEvent) => {
-      if (!mountedRef.current) return
-      // 1008 (Policy Violation) means the server rejected our auth.
-      // Don't retry — clear the token and let the auth guard redirect.
-      if (event.code === 1008) {
-        console.warn('[EventsWS] Auth rejected (1008):', event.reason)
-        useAppStore.getState().clearAuth()
-        return
-      }
-      const delay = Math.min(
-        BASE_DELAY_MS * Math.pow(2, retryCountRef.current),
-        MAX_DELAY_MS,
-      )
-      retryCountRef.current += 1
-      retryTimerRef.current = setTimeout(connect, delay)
-    }
-  }, [pushEvent])
-
-  useEffect(() => {
-    mountedRef.current = true
-    connect()
-
-    return () => {
-      mountedRef.current = false
-      if (retryTimerRef.current !== null) {
-        clearTimeout(retryTimerRef.current)
-      }
-      wsRef.current?.close()
-    }
-  }, [connect])
+  useTicketedSocket<AppEvent>('/ws/events', pushEvent)
 }

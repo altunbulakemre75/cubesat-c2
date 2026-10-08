@@ -32,6 +32,12 @@ from src.config import settings
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
+# Browsers can't set headers on a WebSocket handshake, so the credential has
+# to travel in the URL — where uvicorn's access log (and Loki) record it.
+# A WS ticket is a single-use, 30-second credential bound to the access
+# token that requested it, so a leaked log line is worthless.
+WS_TICKET_TTL_S = 30
+
 
 def _truncate_for_bcrypt(password: str) -> bytes:
     """bcrypt only considers the first 72 bytes of the password. Modern
@@ -111,14 +117,39 @@ class Session:
     jti: str
     expires_at: datetime
     token_version: int
+    # For WS tickets: the access token the ticket was issued under. The
+    # socket lives exactly as long as that session does.
+    parent_jti: str | None = None
 
 
 _SESSION_SQL = """
     SELECT u.role, u.active, u.token_version,
-           EXISTS (SELECT 1 FROM revoked_tokens r WHERE r.jti = $2) AS revoked
+           EXISTS (
+               SELECT 1 FROM revoked_tokens r WHERE r.jti = ANY($2::varchar[])
+           ) AS revoked
       FROM users u
      WHERE u.username = $1
 """
+
+
+async def check_session_state(
+    pool: asyncpg.Pool, username: str, version: int, revocation_jtis: list[str],
+) -> str:
+    """Return the user's current role if the session is still valid, else
+    raise AuthError. Used on every request and by long-lived WebSockets."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(_SESSION_SQL, username, revocation_jtis)
+
+    if row is None:
+        raise AuthError("User no longer exists")
+    if not row["active"]:
+        raise AuthError("Account disabled")
+    if row["revoked"]:
+        raise AuthError("Token has been revoked", revoked_for=username)
+    if version != row["token_version"]:
+        raise AuthError("Session ended; please log in again")
+    role: str = row["role"]
+    return role
 
 
 async def load_session(pool: asyncpg.Pool, token: str, *, kind: str = "access") -> Session:
@@ -136,28 +167,45 @@ async def load_session(pool: asyncpg.Pool, token: str, *, kind: str = "access") 
     if not username or not jti or exp is None:
         raise AuthError("Malformed token")
 
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(_SESSION_SQL, username, jti)
+    revocation_jtis = [jti]
+    session_exp = int(exp)
+    parent_jti: str | None = None
+    if kind == "ws":
+        parent_jti, sexp = payload.get("sid"), payload.get("sexp")
+        if not parent_jti or sexp is None:
+            raise AuthError("Malformed token")
+        revocation_jtis.append(parent_jti)
+        session_exp = int(sexp)
 
-    if row is None:
-        raise AuthError("User no longer exists")
-    if not row["active"]:
-        raise AuthError("Account disabled")
-    if row["revoked"]:
-        raise AuthError("Token has been revoked", revoked_for=username)
     # Tokens minted before token_version existed have no "ver" claim; they
     # map to version 0, which is the column default, so they stay valid
     # until the first event that bumps the version.
-    if int(payload.get("ver", 0)) != row["token_version"]:
-        raise AuthError("Session ended; please log in again")
+    version = int(payload.get("ver", 0))
+    role = await check_session_state(pool, username, version, revocation_jtis)
 
     return Session(
         username=username,
-        role=row["role"],
+        role=role,
         jti=jti,
-        expires_at=datetime.fromtimestamp(int(exp), tz=timezone.utc),
-        token_version=row["token_version"],
+        expires_at=datetime.fromtimestamp(session_exp, tz=timezone.utc),
+        token_version=version,
+        parent_jti=parent_jti,
     )
+
+
+def create_ws_ticket(username: str, version: int, access_jti: str, access_exp: int) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": username,
+        "kind": "ws",
+        "ver": version,
+        "jti": secrets.token_urlsafe(16),
+        "sid": access_jti,
+        "sexp": access_exp,
+        "iat": now,
+        "exp": now + timedelta(seconds=WS_TICKET_TTL_S),
+    }
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
 async def revoke_token(

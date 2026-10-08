@@ -144,7 +144,7 @@ def test_regression_anomaly_event_appevent_shape():
         ),
     )
 
-    asyncio.get_event_loop().run_until_complete(w._run_anomaly_detection(telem))
+    asyncio.run(w._run_anomaly_detection(telem))
     body = json.loads(js.publish.await_args.args[1].decode())
     assert "id" in body
     assert "type" in body

@@ -3,9 +3,11 @@ from fastapi import APIRouter, HTTPException, Request, status
 
 from src.api.audit import log_action
 from src.api.auth import (
+    WS_TICKET_TTL_S,
     AuthError,
     create_access_token,
     create_refresh_token,
+    create_ws_ticket,
     end_all_sessions,
     hash_password,
     load_session,
@@ -29,6 +31,11 @@ class ChangePasswordRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class WsTicketResponse(BaseModel):
+    ticket: str
+    expires_in: int
 
 
 class LogoutRequest(BaseModel):
@@ -110,6 +117,18 @@ async def _end_sessions_after_replay(pool: Pool, username: str) -> None:
     async with pool.acquire() as conn:
         await end_all_sessions(conn, username)
     await log_action(pool, username, "auth.refresh_replay", result="denied")
+
+
+@router.post("/ws-ticket", response_model=WsTicketResponse)
+async def ws_ticket(user: CurrentUser) -> WsTicketResponse:
+    """Short-lived, single-use credential for opening a WebSocket. The
+    socket it opens is bound to (and closed with) the caller's session."""
+    return WsTicketResponse(
+        ticket=create_ws_ticket(
+            user["username"], user["token_version"], user["jti"], user["exp"],
+        ),
+        expires_in=WS_TICKET_TTL_S,
+    )
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

@@ -36,6 +36,7 @@ async def current_user(
         "jti": session.jti,
         "exp": int(session.expires_at.timestamp()),
         "expires_at": session.expires_at,
+        "token_version": session.token_version,
     }
 
 

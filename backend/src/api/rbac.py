@@ -25,3 +25,11 @@ def require_role(minimum: Role, user_role: str) -> None:
             status.HTTP_403_FORBIDDEN,
             detail=f"Role '{user_role}' insufficient. Required: '{minimum.value}'",
         )
+
+
+def has_role(minimum: Role, user_role: str) -> bool:
+    """Non-raising variant for contexts without HTTP semantics (WebSockets)."""
+    try:
+        return _ROLE_RANK[Role(user_role)] >= _ROLE_RANK[minimum]
+    except (ValueError, KeyError):
+        return False
