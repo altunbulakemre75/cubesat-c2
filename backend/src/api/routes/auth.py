@@ -1,16 +1,14 @@
-from datetime import datetime, timezone
-
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Request, status
-from jose import JWTError
 
 from src.api.audit import log_action
 from src.api.auth import (
+    AuthError,
     create_access_token,
     create_refresh_token,
-    decode_token,
+    end_all_sessions,
     hash_password,
-    is_token_revoked,
+    load_session,
     revoke_token,
     verify_password,
 )
@@ -33,6 +31,12 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class LogoutRequest(BaseModel):
+    # Optional so old clients that POST an empty body keep working; new
+    # clients send it so logout also kills the long-lived refresh token.
+    refresh_token: str | None = None
+
+
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, request: Request, pool: Pool):
     # Rate limit BEFORE the bcrypt verify — otherwise an attacker can
@@ -47,7 +51,8 @@ async def login(body: LoginRequest, request: Request, pool: Pool):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, username, password_hash, role, active, must_change_password
+            SELECT id, username, password_hash, role, active,
+                   must_change_password, token_version
             FROM users WHERE username = $1
             """,
             body.username,
@@ -66,8 +71,8 @@ async def login(body: LoginRequest, request: Request, pool: Pool):
     # doesn't cost the user their next four attempts.
     await reset_login_rate(request, row["username"])
 
-    access = create_access_token(subject=row["username"], role=row["role"])
-    refresh = create_refresh_token(subject=row["username"], role=row["role"])
+    access = create_access_token(row["username"], row["token_version"])
+    refresh = create_refresh_token(row["username"], row["token_version"])
     auth_login_total.labels(result="ok").inc()
     await log_action(pool, row["username"], "auth.login", result="ok")
     return TokenResponse(
@@ -78,58 +83,61 @@ async def login(body: LoginRequest, request: Request, pool: Pool):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token_endpoint(body: RefreshRequest):
-    """Exchange a valid refresh token for a fresh access token (and a fresh
-    refresh token). Old refresh token is revoked so it can't be reused."""
+async def refresh_token_endpoint(body: RefreshRequest, pool: Pool):
+    """Exchange a refresh token for a new token pair. The old refresh token
+    is revoked (rotation); presenting it again means a copy leaked, so the
+    user's whole session family is ended."""
     try:
-        payload = decode_token(body.refresh_token)
-    except JWTError as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=f"Invalid refresh token: {exc}")
+        session = await load_session(pool, body.refresh_token, kind="refresh")
+    except AuthError as exc:
+        if exc.revoked_for:
+            await _end_sessions_after_replay(pool, exc.revoked_for)
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=exc.detail) from None
 
-    if payload.get("kind") != "refresh":
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED,
-            detail="Token is not a refresh token",
-        )
+    # Claim the token atomically: if a concurrent request already rotated
+    # it, this is a replay too.
+    if not await revoke_token(pool, session.jti, session.username, session.expires_at):
+        await _end_sessions_after_replay(pool, session.username)
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")
 
-    jti = payload.get("jti")
-    if not jti:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Refresh token missing jti")
-
-    if await is_token_revoked(jti):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Refresh token revoked")
-
-    # Rotate: revoke the old refresh token, issue a new pair
-    exp = int(payload.get("exp", 0))
-    remaining = max(1, exp - int(datetime.now(timezone.utc).timestamp()))
-    await revoke_token(jti, remaining)
-
-    username = payload["sub"]
-    role = payload.get("role", "viewer")
     return TokenResponse(
-        access_token=create_access_token(subject=username, role=role),
-        refresh_token=create_refresh_token(subject=username, role=role),
+        access_token=create_access_token(session.username, session.token_version),
+        refresh_token=create_refresh_token(session.username, session.token_version),
     )
 
 
+async def _end_sessions_after_replay(pool: Pool, username: str) -> None:
+    async with pool.acquire() as conn:
+        await end_all_sessions(conn, username)
+    await log_action(pool, username, "auth.refresh_replay", result="denied")
+
+
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(pool: Pool, user: CurrentUser):
-    """Revoke the caller's current access-token jti. The frontend should also
-    drop its in-memory refresh token; nothing prevents re-login afterwards."""
-    jti = user.get("jti")
-    exp = user.get("exp")
-    if jti and exp:
-        remaining = max(1, int(exp) - int(datetime.now(timezone.utc).timestamp()))
-        await revoke_token(jti, remaining)
+async def logout(pool: Pool, user: CurrentUser, body: LogoutRequest | None = None):
+    """Revoke the caller's access token and, if supplied, the refresh token
+    issued alongside it. Re-login afterwards is unaffected."""
+    await revoke_token(pool, user["jti"], user["username"], user["expires_at"])
+
+    if body and body.refresh_token:
+        try:
+            refresh = await load_session(pool, body.refresh_token, kind="refresh")
+        except AuthError:
+            refresh = None  # already dead — nothing to do
+        if refresh and refresh.username == user["username"]:
+            await revoke_token(pool, refresh.jti, refresh.username, refresh.expires_at)
+
     await log_action(pool, user["username"], "auth.logout")
 
 
-@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/change-password", response_model=TokenResponse)
 async def change_password(
     body: ChangePasswordRequest,
     pool: Pool,
     user: CurrentUser,
 ):
+    """Change the caller's password. Every existing session (including the
+    one making this call) ends; the response carries a fresh token pair so
+    the current client stays logged in."""
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT password_hash FROM users WHERE username = $1",
@@ -153,13 +161,20 @@ async def change_password(
 
     new_hash = hash_password(body.new_password)
     async with pool.acquire() as conn:
-        await conn.execute(
+        version = await conn.fetchval(
             """
             UPDATE users
-               SET password_hash = $1, must_change_password = FALSE
+               SET password_hash = $1,
+                   must_change_password = FALSE,
+                   token_version = token_version + 1
              WHERE username = $2
+            RETURNING token_version
             """,
             new_hash, user["username"],
         )
 
     await log_action(pool, user["username"], "auth.password_change")
+    return TokenResponse(
+        access_token=create_access_token(user["username"], version),
+        refresh_token=create_refresh_token(user["username"], version),
+    )

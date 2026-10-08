@@ -2,7 +2,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, status
 
 from src.api.audit import log_action
-from src.api.auth import hash_password
+from src.api.auth import end_all_sessions, hash_password
 from src.api.deps import CurrentUser, Pool
 from src.api.rbac import Role, require_role
 
@@ -28,6 +28,10 @@ class UserOut(BaseModel):
 
 class RoleChange(BaseModel):
     role: str
+
+
+class ActiveChange(BaseModel):
+    active: bool
 
 
 @router.get("", response_model=list[UserOut])
@@ -112,6 +116,11 @@ async def change_role(username: str, body: RoleChange, pool: Pool, user: Current
             await conn.execute(
                 "UPDATE users SET role = $1 WHERE username = $2", role, username
             )
+            # Role is read from the DB on every request, but outstanding
+            # tokens are still ended so the user re-authenticates under the
+            # new role instead of carrying on mid-session.
+            if target["role"] != role:
+                await end_all_sessions(conn, username)
 
             # Re-check admin count AFTER the update; if we just dropped to 0,
             # roll back. Serializable isolation forces concurrent demotions
@@ -130,3 +139,45 @@ async def change_role(username: str, body: RoleChange, pool: Pool, user: Current
                      target_id=username, target_type="user",
                      details={"new_role": role})
     return {"username": username, "role": role}
+
+
+@router.patch("/{username}/active")
+async def set_active(username: str, body: ActiveChange, pool: Pool, user: CurrentUser):
+    """Enable or disable an account. Disabling ends every session of that
+    user immediately — the offboarding path that previously required a
+    manual SQL UPDATE."""
+    require_role(Role.ADMIN, user["role"])
+
+    if username == user["username"] and not body.active:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Cannot disable your own account. Ask another admin.",
+        )
+
+    async with pool.acquire() as conn:
+        async with conn.transaction(isolation="serializable"):
+            target = await conn.fetchrow(
+                "SELECT role, active FROM users WHERE username = $1 FOR UPDATE", username
+            )
+            if not target:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+
+            await conn.execute(
+                "UPDATE users SET active = $1 WHERE username = $2", body.active, username
+            )
+            if not body.active:
+                await end_all_sessions(conn, username)
+                if target["role"] == "admin":
+                    admin_count = await conn.fetchval(
+                        "SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = TRUE"
+                    )
+                    if admin_count < 1:
+                        raise HTTPException(
+                            status.HTTP_400_BAD_REQUEST,
+                            detail="Cannot disable the last active admin.",
+                        )
+
+    await log_action(pool, user["username"], "user.active_change",
+                     target_id=username, target_type="user",
+                     details={"active": body.active})
+    return {"username": username, "active": body.active}

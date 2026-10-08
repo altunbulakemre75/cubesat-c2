@@ -5,14 +5,13 @@ Targets bugs that wouldn't show up on the happy path:
   - tampered tokens, missing kind field, expired tokens
   - bcrypt 72-byte truncation
   - case-sensitive usernames
-  - revocation behavior with Redis unreachable
+Session validity (revocation, role, deactivation) is covered against a
+real database in tests/integration/test_auth_sessions.py.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
-
 import pytest
 from jose import JWTError, jwt
 
@@ -21,7 +20,6 @@ from src.api.auth import (
     create_refresh_token,
     decode_token,
     hash_password,
-    is_token_revoked,
     verify_password,
 )
 from src.config import settings
@@ -36,16 +34,23 @@ def _decode_unsafe(token: str) -> dict:
 # ─────────────────────────────────────────────────────────────────────
 
 def test_access_token_has_kind_access():
-    t = create_access_token("alice", "operator")
+    t = create_access_token("alice", 3)
     claims = _decode_unsafe(t)
     assert claims["kind"] == "access"
     assert claims["sub"] == "alice"
-    assert claims["role"] == "operator"
+    assert claims["ver"] == 3
     assert "jti" in claims
 
 
+def test_tokens_carry_no_role_claim():
+    """The server reads the role from the DB on every request. A role in
+    the token would only invite someone to trust it again (v0.1.0 did)."""
+    assert "role" not in _decode_unsafe(create_access_token("alice"))
+    assert "role" not in _decode_unsafe(create_refresh_token("alice"))
+
+
 def test_refresh_token_has_kind_refresh():
-    t = create_refresh_token("alice", "operator")
+    t = create_refresh_token("alice")
     claims = _decode_unsafe(t)
     assert claims["kind"] == "refresh"
 
@@ -53,14 +58,14 @@ def test_refresh_token_has_kind_refresh():
 def test_each_token_has_unique_jti():
     """Two tokens minted back-to-back must have different jti — otherwise
     revoking one revokes the other."""
-    t1 = create_access_token("alice", "operator")
-    t2 = create_access_token("alice", "operator")
+    t1 = create_access_token("alice")
+    t2 = create_access_token("alice")
     assert _decode_unsafe(t1)["jti"] != _decode_unsafe(t2)["jti"]
 
 
 def test_decode_rejects_tampered_signature():
     """Last char of the signature flipped. Must raise JWTError."""
-    t = create_access_token("alice", "operator")
+    t = create_access_token("alice")
     head, payload, sig = t.split(".")
     # Pick a different char that's still in the JWT base64url alphabet.
     tampered_sig = sig[:-1] + ("A" if sig[-1] != "A" else "B")
@@ -132,24 +137,3 @@ def test_password_hash_changes_each_time():
     """gensalt() makes each hash unique even for the same password."""
     p = "secret"
     assert hash_password(p) != hash_password(p)
-
-
-# ─────────────────────────────────────────────────────────────────────
-# Revocation (Redis blacklist)
-# ─────────────────────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_is_token_revoked_fail_open_when_redis_down():
-    """If Redis is unreachable, is_token_revoked must return False —
-    otherwise the whole API stops responding to any authenticated request
-    when Redis hiccups. This was an explicit design choice."""
-
-    class _BoomClient:
-        async def exists(self, _key):
-            raise ConnectionError("redis unreachable")
-
-    with patch("src.api.auth.redis_client.get_client", return_value=_BoomClient()):
-        # The conftest fixture stubs is_token_revoked with AsyncMock for
-        # other tests; here we explicitly want the real implementation.
-        from src.api.auth import is_token_revoked as real_is_revoked
-        assert await real_is_revoked("any-jti") is False

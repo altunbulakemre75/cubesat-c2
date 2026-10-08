@@ -28,3 +28,8 @@ export async function createUser(input: CreateUserInput): Promise<User> {
 export async function changeUserRole(username: string, role: User['role']): Promise<void> {
   await apiClient.patch(`/users/${username}/role`, { role })
 }
+
+// Disabling ends every session of that user immediately on the server.
+export async function setUserActive(username: string, active: boolean): Promise<void> {
+  await apiClient.patch(`/users/${username}/active`, { active })
+}

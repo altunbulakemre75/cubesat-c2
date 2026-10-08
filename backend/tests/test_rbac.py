@@ -6,10 +6,7 @@ Docker/TimescaleDB. They test the RBAC gate only, not business logic.
 """
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
-from src.api.auth import create_access_token
 from src.api.rbac import Role, require_role
 
 
@@ -55,95 +52,8 @@ def test_unknown_role_blocked():
     assert exc.value.status_code == 403
 
 
-# ── JWT token content tests ────────────────────────────────────────────────────
-
-def test_token_encodes_role():
-    from src.api.auth import decode_token
-    token = create_access_token("alice", "operator")
-    payload = decode_token(token)
-    assert payload["sub"] == "alice"
-    assert payload["role"] == "operator"
-
-
-def test_expired_token_raises():
-    from datetime import timedelta
-    from jose import JWTError
-    from src.api.auth import decode_token
-    from src.config import settings
-    from jose import jwt
-    from datetime import datetime, timezone
-
-    past = datetime.now(timezone.utc) - timedelta(hours=1)
-    token = jwt.encode(
-        {"sub": "alice", "role": "admin", "exp": past},
-        settings.jwt_secret_key,
-        algorithm=settings.jwt_algorithm,
-    )
-    with pytest.raises(JWTError):
-        decode_token(token)
-
-
-# ── Minimal FastAPI route integration tests (no DB) ──────────────────────────
-
-def _make_app_with_token(role: str) -> tuple[FastAPI, TestClient]:
-    """Returns a tiny FastAPI app + client that injects a JWT for the given role."""
-    from fastapi import Depends
-    from src.api.deps import current_user
-    from src.api.auth import create_access_token
-
-    app = FastAPI()
-    token = create_access_token("testuser", role)
-
-    @app.get("/test-admin")
-    async def admin_only(user=Depends(current_user)):
-        require_role(Role.ADMIN, user["role"])
-        return {"ok": True}
-
-    @app.get("/test-operator")
-    async def operator_only(user=Depends(current_user)):
-        require_role(Role.OPERATOR, user["role"])
-        return {"ok": True}
-
-    client = TestClient(app, raise_server_exceptions=False)
-    client.headers = {"Authorization": f"Bearer {token}"}
-    return app, client
-
-
-def test_viewer_cannot_reach_admin_route():
-    _, client = _make_app_with_token("viewer")
-    resp = client.get("/test-admin")
-    assert resp.status_code == 403
-
-
-def test_operator_cannot_reach_admin_route():
-    _, client = _make_app_with_token("operator")
-    resp = client.get("/test-admin")
-    assert resp.status_code == 403
-
-
-def test_admin_can_reach_admin_route():
-    _, client = _make_app_with_token("admin")
-    resp = client.get("/test-admin")
-    assert resp.status_code == 200
-
-
-def test_viewer_cannot_reach_operator_route():
-    _, client = _make_app_with_token("viewer")
-    resp = client.get("/test-operator")
-    assert resp.status_code == 403
-
-
-def test_operator_can_reach_operator_route():
-    _, client = _make_app_with_token("operator")
-    resp = client.get("/test-operator")
-    assert resp.status_code == 200
-
-
-def test_no_token_returns_401():
-    _, client = _make_app_with_token("admin")
-    client.headers = {}  # remove token
-    resp = client.get("/test-admin")
-    assert resp.status_code == 401  # HTTPBearer: no credentials = 401 Unauthorized
+# Route-level RBAC (role resolved from the DB per request) is covered
+# against a real database in tests/integration/test_auth_sessions.py.
 
 
 # ── Password policy unit tests ────────────────────────────────────────────────

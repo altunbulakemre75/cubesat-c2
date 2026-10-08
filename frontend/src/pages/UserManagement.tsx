@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { changeUserRole, createUser, fetchUsers, type User } from '../api/users'
+import { changeUserRole, createUser, fetchUsers, setUserActive, type User } from '../api/users'
 
 type Role = User['role']
 
@@ -33,6 +33,11 @@ export function UserManagement() {
 
   const roleMut = useMutation({
     mutationFn: (args: { username: string; role: Role }) => changeUserRole(args.username, args.role),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  })
+
+  const activeMut = useMutation({
+    mutationFn: (args: { username: string; active: boolean }) => setUserActive(args.username, args.active),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
   })
 
@@ -131,11 +136,17 @@ export function UserManagement() {
                     </select>
                   </td>
                   <td className="py-2">
-                    {u.active ? (
-                      <span className="text-green-400 text-xs">● active</span>
-                    ) : (
-                      <span className="text-gray-500 text-xs">○ disabled</span>
-                    )}
+                    <button
+                      onClick={() => activeMut.mutate({ username: u.username, active: !u.active })}
+                      title={u.active ? 'Disable account (ends all sessions)' : 'Re-enable account'}
+                      className="text-xs hover:underline"
+                    >
+                      {u.active ? (
+                        <span className="text-green-400">● active</span>
+                      ) : (
+                        <span className="text-gray-500">○ disabled</span>
+                      )}
+                    </button>
                   </td>
                 </tr>
               ))}
