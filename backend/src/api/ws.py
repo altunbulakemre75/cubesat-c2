@@ -27,7 +27,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
-import nats
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 from nats.aio.client import Client as NATSClient
 from nats.js.api import ConsumerConfig, DeliverPolicy
@@ -43,7 +42,7 @@ from src.api.auth import (
 from src.api.deps import Pool
 from src.api.metrics import websocket_connections_active
 from src.api.rbac import Role, has_role
-from src.config import settings
+from src.storage.nats_conn import connect_nats
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -69,7 +68,7 @@ async def _get_shared_nats() -> NATSClient:
         # Double-check after acquiring the lock
         if _shared_nc is not None and _shared_nc.is_connected:
             return _shared_nc
-        _shared_nc = await nats.connect(settings.nats_url)
+        _shared_nc = await connect_nats("cubesat-backend-ws")
         logger.info("WS shared NATS connection established")
         return _shared_nc
 

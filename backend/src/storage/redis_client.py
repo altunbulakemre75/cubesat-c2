@@ -14,7 +14,12 @@ def get_client() -> aioredis.Redis:
         _client = aioredis.Redis(
             host=settings.redis_host,
             port=settings.redis_port,
+            password=settings.redis_password,
             decode_responses=True,
+            # Without timeouts a hung Redis stalls every request that
+            # touches the cache instead of failing fast.
+            socket_connect_timeout=2,
+            socket_timeout=5,
         )
     return _client
 

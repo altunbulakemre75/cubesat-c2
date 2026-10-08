@@ -7,6 +7,7 @@ from nats.aio.client import Client as NATSClient
 from nats.js import JetStreamContext
 
 from src.ax25_framer import build_frame
+from src.config import SimulatorConfig
 from src.satellite import CubeSat
 
 logger = logging.getLogger(__name__)
@@ -42,12 +43,19 @@ async def run_satellite(
         await asyncio.sleep(interval_s)
 
 
-async def connect_with_retry(nats_url: str, max_attempts: int = 10) -> NATSClient:
+async def connect_with_retry(config: SimulatorConfig, max_attempts: int = 10) -> NATSClient:
     """Connect to NATS, retrying on failure (useful when containers start together)."""
+    nats_url = config.nats_url
     for attempt in range(1, max_attempts + 1):
         try:
-            nc = await nats.connect(nats_url)
-            logger.info("Connected to NATS at %s", nats_url)
+            nc = await nats.connect(
+                nats_url,
+                user=config.nats_user,
+                password=config.resolved_nats_password,
+                inbox_prefix=config.nats_inbox_prefix,
+                name="cubesat-simulator",
+            )
+            logger.info("Connected to NATS at %s as %s", nats_url, config.nats_user or "anonymous")
             return nc
         except Exception as exc:  # noqa: BLE001
             wait = min(2 ** attempt, 30)

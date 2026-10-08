@@ -1,19 +1,54 @@
-# CubeSat C2 — Development Environment
+# CubeSat C2 — single-host environment
 # Usage: docker compose up
+#
+# Security posture:
+# - No default passwords. The `secrets` service generates random
+#   credentials into the `cubesat-secrets` volume on first start and every
+#   service reads them from there (deployment/bootstrap/init-secrets.sh).
+#   Pin a value by setting it in .env, e.g. POSTGRES_PASSWORD=...
+# - Only the web UI (3000) and Grafana (3001) listen on the network.
+#   TimescaleDB, Redis, NATS, Prometheus, Loki and the raw API bind to
+#   127.0.0.1: reachable from this machine for development, not from the LAN.
+# - NATS requires authentication with per-service permissions
+#   (deployment/nats/nats-server.conf).
+
+x-secrets-volume: &secrets-ro cubesat-secrets:/run/secrets/cubesat:ro
 
 services:
+  # === One-shot credential generator ===
+  secrets:
+    image: alpine:3.20
+    container_name: cubesat-secrets
+    command: ["/bin/sh", "/init-secrets.sh"]
+    environment:
+      # Optional overrides from .env; empty = keep/generate the stored value.
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - NATS_PASSWORD=${NATS_PASSWORD:-}
+      - NATS_GROUNDSTATION_PASSWORD=${NATS_GROUNDSTATION_PASSWORD:-}
+      - GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-}
+    volumes:
+      - cubesat-secrets:/run/secrets/cubesat
+      - ./deployment/bootstrap/init-secrets.sh:/init-secrets.sh:ro
+    restart: "no"
+
   # === TimescaleDB (PostgreSQL + time-series extension) ===
   timescaledb:
     image: timescale/timescaledb:latest-pg16
     container_name: cubesat-timescaledb
+    depends_on:
+      secrets:
+        condition: service_completed_successfully
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-cubesat}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      POSTGRES_PASSWORD_FILE: /run/secrets/cubesat/postgres_password
       POSTGRES_DB: ${POSTGRES_DB:-cubesat_c2}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - timescaledb-data:/var/lib/postgresql/data
+      - *secrets-ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cubesat}"]
@@ -21,17 +56,22 @@ services:
       timeout: 5s
       retries: 5
 
-  # === Redis (cache & pub/sub) ===
+  # === Redis (cache) ===
   redis:
     image: redis:7-alpine
     container_name: cubesat-redis
+    depends_on:
+      secrets:
+        condition: service_completed_successfully
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$(cat /run/secrets/cubesat/redis_password)\""]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
+      - *secrets-ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$(cat /run/secrets/cubesat/redis_password)\" --no-auth-warning ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -40,13 +80,29 @@ services:
   nats:
     image: nats:alpine
     container_name: cubesat-nats
-    command: ["-js", "-sd", "/data"]
+    depends_on:
+      secrets:
+        condition: service_completed_successfully
+    command:
+      - sh
+      - -c
+      - |
+        export NATS_BACKEND_PASSWORD="$$(cat /run/secrets/cubesat/nats_password)"
+        export NATS_GROUNDSTATION_PASSWORD="$$(cat /run/secrets/cubesat/nats_groundstation_password)"
+        exec nats-server -c /etc/nats/nats-server.conf
     ports:
-      - "4222:4222"   # Client connections
-      - "8222:8222"   # HTTP management
+      - "127.0.0.1:4222:4222"   # Client connections
+      - "127.0.0.1:8222:8222"   # HTTP monitoring
     volumes:
       - nats-data:/data
+      - ./deployment/nats/nats-server.conf:/etc/nats/nats-server.conf:ro
+      - *secrets-ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # === Backend API (FastAPI) ===
   backend:
@@ -55,28 +111,34 @@ services:
       dockerfile: Dockerfile
     container_name: cubesat-backend
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"   # direct API access for development; the UI goes through nginx
     depends_on:
       timescaledb:
         condition: service_healthy
       redis:
         condition: service_healthy
       nats:
-        condition: service_started
+        condition: service_healthy
     environment:
       - POSTGRES_HOST=timescaledb
       - POSTGRES_PORT=5432
       - POSTGRES_USER=${POSTGRES_USER:-cubesat}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-devpassword}
       - POSTGRES_DB=${POSTGRES_DB:-cubesat_c2}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - NATS_URL=nats://nats:4222
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - DEBUG=true
+      - NATS_USER=backend
+      # Passwords and the JWT key come from the generated secret files.
+      - CUBESAT_SECRETS_DIR=/run/secrets/cubesat
+      # nginx in the frontend container is the only proxy allowed to set
+      # X-Forwarded-For (login rate limiting keys on the client IP).
+      - TRUSTED_PROXIES=["frontend"]
+      - LOGIN_RATE_LIMIT_ENABLED=${LOGIN_RATE_LIMIT_ENABLED:-true}
+      - DEBUG=${DEBUG:-false}
       - LOG_LEVEL=INFO
     volumes:
       - ./backend:/app
+      - *secrets-ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -84,7 +146,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # === Satellite Simulator ===
+  # === Satellite Simulator (acts as a ground station on the bus) ===
   simulator:
     build:
       context: ./simulator
@@ -92,22 +154,26 @@ services:
     container_name: cubesat-simulator
     depends_on:
       nats:
-        condition: service_started
+        condition: service_healthy
     environment:
       - SIM_NATS_URL=nats://nats:4222
+      - SIM_NATS_USER=groundstation
+      - SIM_NATS_PASSWORD_FILE=/run/secrets/cubesat/nats_groundstation_password
       - SIM_SATELLITES=CUBESAT1,CUBESAT2,CUBESAT3
       - SIM_INTERVAL_S=1.0
       - SIM_FAULT_PROBABILITY=0.001
+    volumes:
+      - *secrets-ro
     restart: unless-stopped
 
-  # === Frontend (React + Vite, served via nginx) ===
+  # === Frontend (React + Vite, served via nginx; proxies /api and /ws) ===
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: cubesat-frontend
     ports:
-      - "3000:80"   # nginx serving built React app
+      - "3000:80"
     depends_on:
       - backend
     restart: unless-stopped
@@ -117,7 +183,7 @@ services:
     image: prom/prometheus:latest
     container_name: cubesat-prometheus
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./deployment/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     restart: unless-stopped
@@ -129,14 +195,20 @@ services:
     ports:
       - "3001:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      # Password: docker compose run --rm secrets show
+      - GF_SECURITY_ADMIN_PASSWORD__FILE=/run/secrets/cubesat/grafana_admin_password
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana-data:/var/lib/grafana
       - ./deployment/grafana/provisioning:/etc/grafana/provisioning
+      - *secrets-ro
     depends_on:
-      - prometheus
-      - loki
+      secrets:
+        condition: service_completed_successfully
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
     restart: unless-stopped
 
   # === Loki (log aggregation) ===
@@ -144,7 +216,7 @@ services:
     image: grafana/loki:2.9.0
     container_name: cubesat-loki
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     command: -config.file=/etc/loki/local-config.yaml
     volumes:
       - ./deployment/loki/loki-config.yml:/etc/loki/local-config.yaml
@@ -165,6 +237,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  cubesat-secrets:
   timescaledb-data:
   redis-data:
   nats-data:

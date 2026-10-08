@@ -23,7 +23,7 @@ async def main() -> None:
         config.fault_probability,
     )
 
-    nc = await connect_with_retry(config.nats_url)
+    nc = await connect_with_retry(config)
     js = nc.jetstream()
 
     satellites = [

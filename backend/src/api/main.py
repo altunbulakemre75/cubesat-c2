@@ -5,7 +5,6 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-import nats
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -23,6 +22,7 @@ from src.ingestion.writer import TelemetryWriter
 from src.scheduler import CommandScheduler
 from src.storage.db import close_pool, get_pool
 from src.storage.migrations import run_migrations
+from src.storage.nats_conn import connect_nats
 from src.storage.redis_client import close_client
 
 logging.basicConfig(
@@ -41,7 +41,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     await run_migrations(pool)
     await ensure_admin_user(pool)
 
-    nc = await nats.connect(settings.nats_url)
+    nc = await connect_nats()
     js = nc.jetstream()
 
     await ensure_stream(js)

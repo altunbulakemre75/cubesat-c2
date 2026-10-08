@@ -1,10 +1,11 @@
 import axios, { type AxiosError, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
 import { useAppStore } from '../store'
+import { API_BASE_URL } from './urls'
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+export { WS_BASE_URL } from './urls'
 
 export const apiClient = axios.create({
-  baseURL: BASE_URL,
+  baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
   timeout: 15_000,
 })
@@ -125,5 +126,3 @@ async function doRefresh(): Promise<boolean> {
     return false
   }
 }
-
-export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL ?? 'ws://localhost:8000'

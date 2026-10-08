@@ -1,4 +1,5 @@
 import logging
+import os
 import secrets
 
 from pydantic import model_validator
@@ -22,7 +23,17 @@ _FORBIDDEN_JWT_SECRETS = frozenset({
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Credentials resolve as: explicit env var > file in CUBESAT_SECRETS_DIR
+    # (one file per field, e.g. postgres_password) > default. docker-compose
+    # generates random secrets into that directory on first start, so a
+    # fresh install ships with no default passwords. Empty env vars are
+    # ignored so compose can pass ${VAR:-} placeholders for overrides.
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore",
+        env_ignore_empty=True,
+        secrets_dir=os.environ.get("CUBESAT_SECRETS_DIR") or None,
+    )
 
     # Database
     postgres_host: str = "localhost"
@@ -34,9 +45,13 @@ class Settings(BaseSettings):
     # Redis
     redis_host: str = "localhost"
     redis_port: int = 6379
+    redis_password: str | None = None
 
-    # NATS
+    # NATS — the backend connects as the privileged "backend" user (see
+    # deployment/nats/nats-server.conf).
     nats_url: str = "nats://localhost:4222"
+    nats_user: str | None = None
+    nats_password: str | None = None
 
     # Auth — default empty means "generate random in dev, fail in prod"
     jwt_secret_key: str = ""
