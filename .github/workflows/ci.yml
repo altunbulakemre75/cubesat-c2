@@ -146,14 +146,23 @@ jobs:
           echo "LOGIN_RATE_LIMIT_ENABLED=false" >> .env
           docker compose up -d --build backend simulator timescaledb redis nats
 
-      - name: Wait for backend health
+      - name: Wait for backend readiness
         run: |
           for i in $(seq 1 60); do
-            if curl -fsS http://localhost:8000/health > /dev/null; then
+            if curl -fsS http://localhost:8000/ready > /dev/null; then
               echo "backend ready"; break
             fi
             sleep 2
           done
+
+      - name: Create the E2E user
+        # Production builds have no auto-login and the bootstrap admin must
+        # change its password first, so the suite logs in as its own user.
+        run: |
+          docker compose exec -T -e E2E_USERNAME=e2e -e E2E_PASSWORD="$E2E_PASSWORD" \
+            backend python - < frontend/e2e/seed_user.py
+        env:
+          E2E_PASSWORD: e2e-ci-password-not-secret
 
       - name: Install Playwright
         working-directory: frontend
@@ -166,6 +175,8 @@ jobs:
         env:
           VITE_API_BASE_URL: http://localhost:8000
           VITE_WS_BASE_URL: ws://localhost:8000
+          E2E_USERNAME: e2e
+          E2E_PASSWORD: e2e-ci-password-not-secret
         run: |
           npm run build
           npx vite preview --port 3000 --host &

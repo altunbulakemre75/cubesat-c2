@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { login } from './login'
 
 /**
  * E2E happy-path: dashboard renders with at least one satellite + the
@@ -15,11 +16,10 @@ test.describe('Dashboard', () => {
     page.on('pageerror', (err) => {
       throw new Error(`Uncaught page error: ${err.message}`)
     })
-    await page.goto('/')
+    await login(page)
   })
 
   test('loads, hides login screen, shows the satellite list', async ({ page }) => {
-    // Auto-login should land us straight on the dashboard.
     await expect(page.getByText(/CubeSat C2/i)).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText(/SATELLITES/i)).toBeVisible()
     // At least one satellite card visible — the simulator publishes 3.
