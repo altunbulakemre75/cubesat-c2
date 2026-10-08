@@ -1,5 +1,6 @@
 import pytest
-from src.commands.models import Command, CommandStatus, MAX_RETRIES
+
+from src.commands.models import MAX_RETRIES, Command, CommandStatus
 
 
 def _cmd(command_type: str = "ping", **kwargs) -> Command:

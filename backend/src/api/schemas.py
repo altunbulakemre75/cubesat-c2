@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 
 from src.ingestion.models import SatelliteMode
 
-
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 class LoginRequest(BaseModel):

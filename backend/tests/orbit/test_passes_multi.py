@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import patch
 
@@ -21,7 +21,7 @@ from src.orbit.passes import GroundStation, predict_passes, predict_passes_multi
 
 ISS_L1 = "1 25544U 98067A   24001.50000000  .00016717  00000+0  10270-3 0  9002"
 ISS_L2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.49815305 30001"
-START = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+START = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
 
 STATIONS = [
     GroundStation(1, "Ankara", 39.93, 32.85, 900.0),
@@ -71,10 +71,10 @@ class _Conn:
     async def executemany(self, *_a: Any) -> None:
         return None
 
-    def transaction(self) -> "_Conn":
+    def transaction(self) -> _Conn:
         return self
 
-    async def __aenter__(self) -> "_Conn":
+    async def __aenter__(self) -> _Conn:
         return self
 
     async def __aexit__(self, *_exc: Any) -> None:

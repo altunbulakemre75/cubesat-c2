@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from src.ingestion.adapters.kiss import KISSAdapter, _unescape, _FEND, _FESC, _TFEND, _TFESC
+from src.ingestion.adapters.kiss import _FEND, _FESC, _TFEND, _TFESC, KISSAdapter, _unescape
 
 
 def _make_ax25_frame() -> bytes:

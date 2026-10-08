@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Iterator
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -162,7 +162,7 @@ def test_ticket_is_single_use(client: TestClient, db: Db, fake_js: _FakeJetStrea
 
 def test_expired_ticket_is_rejected(client: TestClient, db: Db, fake_js: _FakeJetStream) -> None:
     db.create_user("ann", PW, "viewer")
-    past = datetime.now(timezone.utc) - timedelta(minutes=5)
+    past = datetime.now(UTC) - timedelta(minutes=5)
     stale = jwt.encode(
         {"sub": "ann", "kind": "ws", "ver": 0, "jti": "t1", "sid": "s1",
          "sexp": int((past + timedelta(hours=1)).timestamp()),

@@ -44,6 +44,9 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+# UP042 would turn `class X(str, Enum)` into StrEnum, which changes what
+# str(member) returns — a behaviour change, not a style fix.
+ignore = ["UP042"]
 
 [tool.mypy]
 python_version = "3.11"

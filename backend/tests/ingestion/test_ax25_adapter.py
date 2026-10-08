@@ -7,7 +7,7 @@ verified by the integration test (test_ax25_roundtrip.py, added in Faz 1.6).
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -61,9 +61,9 @@ def test_decode_returns_canonical_telemetry():
 
 
 def test_decode_timestamp_is_utc_now():
-    before = datetime.now(tz=timezone.utc)
+    before = datetime.now(tz=UTC)
     ct = adapter.decode(_build_frame(_valid_payload()))
-    after = datetime.now(tz=timezone.utc)
+    after = datetime.now(tz=UTC)
     assert before <= ct.timestamp <= after
 
 

@@ -2,8 +2,8 @@
 
 import asyncio
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,8 +11,20 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from src.api.background import BackgroundServices
 from src.api.bootstrap import ensure_admin_user, ensure_seed_satellites
-from src.api.routes import anomalies, auth, commands, fdir, passes, satnogs, satellites, stations, telemetry, users
-from src.api.ws import close_shared_nats, router as ws_router
+from src.api.routes import (
+    anomalies,
+    auth,
+    commands,
+    fdir,
+    passes,
+    satellites,
+    satnogs,
+    stations,
+    telemetry,
+    users,
+)
+from src.api.ws import close_shared_nats
+from src.api.ws import router as ws_router
 from src.config import settings
 from src.storage.db import close_pool, get_pool
 from src.storage.leader import LeaderElector
@@ -95,8 +107,9 @@ def create_app() -> FastAPI:
         all reachable. Used by k8s/docker to decide when to route traffic.
         Each downstream is timeboxed (2s wall clock) so a hung dependency
         can't pin the probe response."""
-        from fastapi.responses import JSONResponse
         import asyncio
+
+        from fastapi.responses import JSONResponse
 
         _PROBE_TIMEOUT_S = 2.0
 

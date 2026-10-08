@@ -11,7 +11,7 @@ import math
 import time
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 WINDOW_SIZE = 60          # number of recent values per parameter
 WARNING_THRESHOLD = 2.0   # z-score for warning
@@ -37,7 +37,7 @@ class AnomalyEvent:
     value: float
     z_score: float
     severity: str        # "warning" | "critical"
-    detected_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    detected_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class ParameterStats:

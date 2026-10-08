@@ -7,7 +7,7 @@ Fix: cap the number of tracked (sat, param) pairs; evict least-recently-seen
 when the limit is reached.
 """
 
-from src.anomaly.detector import AnomalyDetector, MAX_TRACKED_KEYS
+from src.anomaly.detector import MAX_TRACKED_KEYS, AnomalyDetector
 
 
 def test_detector_evicts_oldest_keys_when_limit_exceeded():

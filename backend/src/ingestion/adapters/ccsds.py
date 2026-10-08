@@ -21,7 +21,7 @@ User data field:
 
 import json
 import struct
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import ValidationError
 
@@ -97,7 +97,7 @@ class CCSDSAdapter(ProtocolAdapter):
             raise ValueError(f"CCSDS payload validation failed: {exc}") from exc
 
         return CanonicalTelemetry(
-            timestamp=datetime.now(tz=timezone.utc),
+            timestamp=datetime.now(tz=UTC),
             satellite_id=str(payload.get("satellite_id", f"APID-{apid}")),
             source=self.source_name,
             sequence=int(payload.get("sequence", seq_count)),

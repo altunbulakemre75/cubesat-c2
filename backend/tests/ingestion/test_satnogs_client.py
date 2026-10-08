@@ -2,8 +2,8 @@
 Unit tests for SatNOGSClient — all HTTP calls are mocked.
 """
 
-import pytest
 import httpx
+import pytest
 import respx
 
 from src.ingestion.satnogs_client import SatNOGSClient

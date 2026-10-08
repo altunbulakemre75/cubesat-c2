@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sgp4.api import WGS84, Satrec
 
@@ -116,7 +116,7 @@ def predict_passes_multi(
     only the cheap elevation test runs per station. CPU-bound — call it via
     asyncio.to_thread from async code."""
     sat = Satrec.twoline2rv(tle_line1, tle_line2, WGS84)
-    start = start.astimezone(timezone.utc)
+    start = start.astimezone(UTC)
     end = start + timedelta(hours=horizon_hours)
     step = timedelta(seconds=step_seconds)
     tracks = [_Track(st) for st in stations]

@@ -13,7 +13,7 @@ silently ACK'ed and dropped.
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import asyncpg
 from nats.aio.msg import Msg
@@ -272,4 +272,4 @@ class TelemetryWriter:
 
 
 # Suppress "unused" lint in source for the imported but-not-used datetime
-_ = datetime.now(timezone.utc)
+_ = datetime.now(UTC)

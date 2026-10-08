@@ -1,6 +1,6 @@
 import random
 
-from src.anomaly.detector import AnomalyDetector, WINDOW_SIZE
+from src.anomaly.detector import AnomalyDetector
 
 _RNG = random.Random(42)
 

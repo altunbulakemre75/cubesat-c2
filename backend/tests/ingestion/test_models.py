@@ -1,9 +1,9 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
 
-from src.ingestion.models import CanonicalTelemetry, SatelliteMode, TelemetryParams
+from src.ingestion.models import CanonicalTelemetry, SatelliteMode
 
 
 def _valid_params() -> dict:
@@ -20,7 +20,7 @@ def _valid_params() -> dict:
 
 def _valid_telemetry(**overrides) -> dict:
     base = {
-        "timestamp": datetime.now(tz=timezone.utc),
+        "timestamp": datetime.now(tz=UTC),
         "satellite_id": "CUBESAT1",
         "source": "ax25",
         "sequence": 42,

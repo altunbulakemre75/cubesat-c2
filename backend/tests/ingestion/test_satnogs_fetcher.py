@@ -14,11 +14,10 @@ network in the test process.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from datetime import datetime, timezone
 
 from src.ingestion.satnogs_fetcher import SatnogsTelemetryFetcher, _coerce_decoded, _parse_iso
 
@@ -81,7 +80,7 @@ def test_parse_iso_handles_z_suffix():
     """SatNOGS uses '...Z' which Python <3.11 fromisoformat doesn't accept.
     The fix replaces Z with +00:00 before parsing."""
     out = _parse_iso("2026-04-27T10:00:00Z")
-    assert out == datetime(2026, 4, 27, 10, 0, 0, tzinfo=timezone.utc)
+    assert out == datetime(2026, 4, 27, 10, 0, 0, tzinfo=UTC)
 
 
 def test_parse_iso_handles_explicit_offset():

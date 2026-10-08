@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import asyncpg
@@ -60,7 +60,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 def _make_token(subject: str, *, version: int, ttl: timedelta, kind: str) -> str:
     """Encode a JWT with kind=access|refresh, the user's token_version and a
     unique jti for per-token revocation. Deliberately carries no role."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": subject,
         "kind": kind,
@@ -187,14 +187,14 @@ async def load_session(pool: asyncpg.Pool, token: str, *, kind: str = "access") 
         username=username,
         role=role,
         jti=jti,
-        expires_at=datetime.fromtimestamp(session_exp, tz=timezone.utc),
+        expires_at=datetime.fromtimestamp(session_exp, tz=UTC),
         token_version=version,
         parent_jti=parent_jti,
     )
 
 
 def create_ws_ticket(username: str, version: int, access_jti: str, access_exp: int) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": username,
         "kind": "ws",

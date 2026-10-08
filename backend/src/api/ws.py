@@ -24,7 +24,7 @@ connection per WebSocket (which caused N connections for N clients).
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
@@ -117,7 +117,7 @@ async def _authenticate_ws(
     # Single use: a ticket replayed from a log line is already spent. The
     # ticket itself expires within WS_TICKET_TTL_S, so that's how long the
     # revocation row needs to live.
-    spent_until = datetime.now(timezone.utc) + timedelta(seconds=WS_TICKET_TTL_S)
+    spent_until = datetime.now(UTC) + timedelta(seconds=WS_TICKET_TTL_S)
     if not await revoke_token(pool, session.jti, session.username, spent_until):
         await _close(websocket, status.WS_1008_POLICY_VIOLATION, "Ticket already used")
         return None
@@ -131,12 +131,12 @@ async def _guard(
     assert session.parent_jti is not None
     errors = 0
     while True:
-        remaining = (session.expires_at - datetime.now(timezone.utc)).total_seconds()
+        remaining = (session.expires_at - datetime.now(UTC)).total_seconds()
         if remaining <= 0:
             await _close(websocket, WS_CLOSE_SESSION_EXPIRED, "Session expired")
             return
         await asyncio.sleep(min(_GUARD_INTERVAL_S, remaining))
-        if datetime.now(timezone.utc) >= session.expires_at:
+        if datetime.now(UTC) >= session.expires_at:
             continue
         try:
             role = await check_session_state(

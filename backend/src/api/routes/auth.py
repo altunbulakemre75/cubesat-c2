@@ -1,8 +1,7 @@
-from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Request, status
+from pydantic import BaseModel
 
 from src.api.audit import log_action
-from src.api.bootstrap import remove_bootstrap_file
 from src.api.auth import (
     WS_TICKET_TTL_S,
     AuthError,
@@ -15,6 +14,7 @@ from src.api.auth import (
     revoke_token,
     verify_password,
 )
+from src.api.bootstrap import remove_bootstrap_file
 from src.api.deps import CurrentUser, Pool
 from src.api.metrics import auth_login_total
 from src.api.rate_limit import check_login_rate, reset_login_rate

@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel, Field
 
 from src.api.audit import log_action
 from src.api.deps import CurrentUser, Pool

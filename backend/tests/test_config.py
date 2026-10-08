@@ -9,7 +9,6 @@ The fix uses @model_validator(mode="after").
 """
 
 import importlib
-import os
 
 import pytest
 

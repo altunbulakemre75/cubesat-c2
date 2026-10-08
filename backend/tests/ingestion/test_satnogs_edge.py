@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
-import pytest
+from datetime import UTC, datetime
 
 from src.ingestion.satnogs_fetcher import _coerce_decoded, _parse_iso
 
@@ -19,7 +17,7 @@ def test_parse_iso_negative_offset():
     out = _parse_iso("2026-04-27T05:00:00-05:00")
     assert out is not None
     # 05:00 in -05 == 10:00 UTC
-    assert out.astimezone(timezone.utc) == datetime(2026, 4, 27, 10, 0, tzinfo=timezone.utc)
+    assert out.astimezone(UTC) == datetime(2026, 4, 27, 10, 0, tzinfo=UTC)
 
 
 def test_parse_iso_no_timezone_info_is_naive():
@@ -31,7 +29,7 @@ def test_parse_iso_no_timezone_info_is_naive():
     # what matters is it doesn't claim "+00:00" when the input said nothing.
     if out.tzinfo is not None:
         # If a timezone was attached, it MUST be UTC by convention
-        assert out.tzinfo == timezone.utc
+        assert out.tzinfo == UTC
 
 
 def test_coerce_decoded_handles_array_top_level():

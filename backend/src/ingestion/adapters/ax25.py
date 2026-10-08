@@ -13,7 +13,7 @@ Frame layout (matches simulator/src/ax25_framer.py):
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import ValidationError
 
@@ -81,7 +81,7 @@ class AX25Adapter(ProtocolAdapter):
             raise ValueError(f"Telemetry parameter validation failed: {exc}") from exc
 
         return CanonicalTelemetry(
-            timestamp=datetime.now(tz=timezone.utc),
+            timestamp=datetime.now(tz=UTC),
             satellite_id=str(payload["satellite_id"]),
             source=self.source_name,
             sequence=int(payload["sequence"]),

@@ -4,9 +4,10 @@ Fix: introduce RoleChange Pydantic model and take it as JSON body.
 """
 
 from inspect import signature
+
 from pydantic import BaseModel
 
-from src.api.routes.users import change_role, RoleChange
+from src.api.routes.users import RoleChange, change_role
 
 
 def test_change_role_uses_body_model():

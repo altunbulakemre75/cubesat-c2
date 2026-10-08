@@ -9,7 +9,7 @@ own station that produced no telemetry is.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from src.fdir.monitor import (
     BATTERY_CRITICAL_V,
@@ -21,7 +21,7 @@ from src.fdir.monitor import (
     assess,
 )
 
-NOW = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 8, 12, 0, tzinfo=UTC)
 
 
 def _obs(age_s: float = 5, **values: float | None) -> Observation:

@@ -1,9 +1,9 @@
 """Single place that opens NATS connections, so every client carries the
 credentials from settings."""
 
+import nats
 from nats.aio.client import Client as NATSClient
 
-import nats
 from src.config import settings
 
 

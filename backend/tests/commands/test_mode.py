@@ -9,14 +9,14 @@ command restrictions silently stopped applying between passes.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.commands.mode import MODE_STALE_AFTER, ModeReading, current_mode
 from src.ingestion.models import SatelliteMode
 
-NOW = datetime.now(timezone.utc)
+NOW = datetime.now(UTC)
 
 
 def _pool(row: dict[str, Any] | None) -> MagicMock:

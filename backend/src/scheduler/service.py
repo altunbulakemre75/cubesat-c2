@@ -30,14 +30,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 from nats.js import JetStreamContext
 from nats.js.api import ConsumerConfig, DeliverPolicy
 
 from src.commands.mode import current_mode
-from src.commands.models import CommandStatus, MAX_RETRIES, UNSAFE_RETRY_TYPES
+from src.commands.models import MAX_RETRIES, UNSAFE_RETRY_TYPES
 from src.commands.policy import evaluate
 
 logger = logging.getLogger(__name__)
@@ -239,7 +239,7 @@ class CommandScheduler:
                 "command_type": row["command_type"],
                 "params": dict(row["params"]) if row["params"] else {},
                 "retry_count": row["retry_count"],
-                "issued_at": datetime.now(timezone.utc).isoformat(),
+                "issued_at": datetime.now(UTC).isoformat(),
             }).encode()
 
             try:
@@ -535,7 +535,7 @@ class CommandScheduler:
                 logger.error("Timeout sweep error: %s", exc, exc_info=True)
 
     async def _timeout_once(self) -> None:
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=ACK_TIMEOUT_S)
+        cutoff = datetime.now(UTC) - timedelta(seconds=ACK_TIMEOUT_S)
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """

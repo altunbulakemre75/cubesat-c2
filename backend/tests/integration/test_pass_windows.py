@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import asyncpg
@@ -133,7 +133,7 @@ def test_timeout_inside_the_window_retries_with_backoff(
     row = _row(db, cmd)
     assert row["status"] == "scheduled"
     assert row["retry_count"] == retry_count + 1
-    expected = datetime.now(timezone.utc) + timedelta(seconds=backoff_s)
+    expected = datetime.now(UTC) + timedelta(seconds=backoff_s)
     assert abs((row["scheduled_at"] - expected).total_seconds()) < 3
 
 

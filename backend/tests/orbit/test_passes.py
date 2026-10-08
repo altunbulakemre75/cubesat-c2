@@ -5,9 +5,7 @@ Validates elevation/azimuth geometry and the predict_passes function
 using the ISS TLE over a known ground station (Ankara).
 """
 
-from datetime import datetime, timezone
-
-import pytest
+from datetime import UTC, datetime
 
 from src.orbit.passes import (
     GroundStation,
@@ -94,7 +92,7 @@ class TestPredictPasses:
 
     def test_returns_pass_windows(self):
         """Over 24 hours, ISS should have at least one pass over Ankara."""
-        start = datetime(2024, 6, 14, 0, 0, 0, tzinfo=timezone.utc)
+        start = datetime(2024, 6, 14, 0, 0, 0, tzinfo=UTC)
         passes = predict_passes(
             satellite_id="ISS",
             tle_line1=ISS_LINE1,
@@ -109,7 +107,7 @@ class TestPredictPasses:
 
     def test_aos_before_los(self):
         """AOS must always be before LOS."""
-        start = datetime(2024, 6, 14, 0, 0, 0, tzinfo=timezone.utc)
+        start = datetime(2024, 6, 14, 0, 0, 0, tzinfo=UTC)
         passes = predict_passes(
             satellite_id="ISS",
             tle_line1=ISS_LINE1,
@@ -123,7 +121,7 @@ class TestPredictPasses:
 
     def test_max_elevation_above_minimum(self):
         """Returned passes should meet the minimum elevation threshold."""
-        start = datetime(2024, 6, 14, 0, 0, 0, tzinfo=timezone.utc)
+        start = datetime(2024, 6, 14, 0, 0, 0, tzinfo=UTC)
         passes = predict_passes(
             satellite_id="ISS",
             tle_line1=ISS_LINE1,
@@ -137,7 +135,7 @@ class TestPredictPasses:
 
     def test_short_horizon_may_have_no_passes(self):
         """Very short horizon (1 min) may return zero passes — no crash."""
-        start = datetime(2024, 6, 14, 0, 0, 0, tzinfo=timezone.utc)
+        start = datetime(2024, 6, 14, 0, 0, 0, tzinfo=UTC)
         passes = predict_passes(
             satellite_id="ISS",
             tle_line1=ISS_LINE1,

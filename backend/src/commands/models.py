@@ -10,7 +10,7 @@ approval endpoint (a different admin) moves them to PENDING.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -79,8 +79,8 @@ class Command(BaseModel):
     created_by: str | None = None
     retry_count: int = 0
     error_message: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     scheduled_at: datetime | None = None
     sent_at: datetime | None = None
     acked_at: datetime | None = None
@@ -93,7 +93,7 @@ class Command(BaseModel):
             raise ValueError(
                 f"Invalid transition {self.status} → {target} for command {self.id}"
             )
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         updates: dict[str, Any] = {"status": target, "updated_at": now}
 
         if target == CommandStatus.SENT:

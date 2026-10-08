@@ -28,7 +28,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import asyncpg
@@ -199,7 +199,7 @@ class FDIRMonitor:
             ) if latest else None,
             LastPass(last_pass["name"], last_pass["aos"], last_pass["los"]) if last_pass else None,
             has_passes,
-            datetime.now(timezone.utc),
+            datetime.now(UTC),
         )
         if not result.warnings:
             return
@@ -212,7 +212,7 @@ class FDIRMonitor:
         await self._raise_alert(satellite_id, "; ".join(result.warnings))
 
     async def _raise_alert(self, satellite_id: str, reason: str) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Persist FIRST so the alert survives a restart and operators can ack
         # it after the WS event is gone. The DB id is reused as the NATS event

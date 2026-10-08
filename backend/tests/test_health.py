@@ -18,6 +18,7 @@ def _build_test_app():
     """Build the FastAPI app with a no-op lifespan so we don't actually
     open DB/NATS/Redis connections during these unit tests."""
     from contextlib import asynccontextmanager
+
     from src.api.main import create_app
 
     @asynccontextmanager

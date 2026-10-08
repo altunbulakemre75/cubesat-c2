@@ -5,18 +5,18 @@ Uses the ISS (NORAD 25544) TLE as a well-known reference
 to validate SGP4 propagation and ECI→geodetic conversion.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from src.orbit.propagator import SatellitePosition, propagate, _datetime_to_jd, _jd_to_gst
+from src.orbit.propagator import SatellitePosition, _datetime_to_jd, _jd_to_gst, propagate
 
 # ISS TLE — epoch 2024-06-14 (stable, well-documented orbit)
 ISS_LINE1 = "1 25544U 98067A   24166.50000000  .00016717  00000-0  10270-3 0  9000"
 ISS_LINE2 = "2 25544  51.6400 200.0000 0001000   0.0000   0.0000 15.50000000000000"
 
 # Propagation time near TLE epoch
-T_NEAR_EPOCH = datetime(2024, 6, 14, 12, 0, 0, tzinfo=timezone.utc)
+T_NEAR_EPOCH = datetime(2024, 6, 14, 12, 0, 0, tzinfo=UTC)
 
 
 class TestPropagate:
@@ -51,8 +51,8 @@ class TestPropagate:
 
     def test_different_times_different_positions(self):
         """Propagating to two different times should yield different positions."""
-        t1 = datetime(2024, 6, 14, 12, 0, 0, tzinfo=timezone.utc)
-        t2 = datetime(2024, 6, 14, 12, 10, 0, tzinfo=timezone.utc)
+        t1 = datetime(2024, 6, 14, 12, 0, 0, tzinfo=UTC)
+        t2 = datetime(2024, 6, 14, 12, 10, 0, tzinfo=UTC)
         pos1 = propagate(ISS_LINE1, ISS_LINE2, t1)
         pos2 = propagate(ISS_LINE1, ISS_LINE2, t2)
         # ISS moves ~7.7 km/s, in 10 minutes it travels ~4620 km
@@ -70,13 +70,13 @@ class TestJulianDate:
 
     def test_j2000_epoch(self):
         """J2000.0 = 2000-01-01 12:00:00 UTC = JD 2451545.0"""
-        j2000 = datetime(2000, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        j2000 = datetime(2000, 1, 1, 12, 0, 0, tzinfo=UTC)
         jd = _datetime_to_jd(j2000)
         assert abs(jd - 2451545.0) < 0.001
 
     def test_known_date(self):
         """2024-06-14 00:00:00 UTC ≈ JD 2460475.5"""
-        t = datetime(2024, 6, 14, 0, 0, 0, tzinfo=timezone.utc)
+        t = datetime(2024, 6, 14, 0, 0, 0, tzinfo=UTC)
         jd = _datetime_to_jd(t)
         assert abs(jd - 2460475.5) < 0.01
 

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Query
 
@@ -17,7 +17,7 @@ async def list_passes(
     limit: int = Query(default=20, ge=1, le=100),
 ):
     if from_time is None:
-        from_time = datetime.now(timezone.utc)
+        from_time = datetime.now(UTC)
 
     conditions = ["p.aos >= $1"]
     args: list = [from_time]

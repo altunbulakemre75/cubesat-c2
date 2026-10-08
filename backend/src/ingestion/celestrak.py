@@ -12,7 +12,7 @@ freshness window for SGP4 propagation.
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 import asyncpg
 import httpx
@@ -139,6 +139,5 @@ class CelestrakRefresher:
     def _tle_age_hours(latest_epoch: datetime | None) -> float | None:
         if latest_epoch is None:
             return None
-        from datetime import timezone
-        delta = datetime.now(timezone.utc) - latest_epoch
+        delta = datetime.now(UTC) - latest_epoch
         return delta.total_seconds() / 3600.0

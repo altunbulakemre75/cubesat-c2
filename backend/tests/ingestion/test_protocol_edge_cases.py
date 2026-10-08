@@ -16,7 +16,6 @@ from src.ingestion.adapters.ax25 import AX25Adapter
 from src.ingestion.adapters.ccsds import CCSDSAdapter, build_ccsds_packet
 from src.ingestion.adapters.kiss import KISSAdapter, _unescape
 
-
 _VALID_PAYLOAD = json.dumps({
     "satellite_id": "AO91", "mode": "nominal",
     "battery_voltage_v": 3.9, "temperature_obcs_c": 25.0,

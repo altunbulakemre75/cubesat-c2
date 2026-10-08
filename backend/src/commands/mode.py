@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 
@@ -33,7 +33,7 @@ class ModeReading:
 
     @property
     def stale(self) -> bool:
-        return datetime.now(timezone.utc) - self.observed_at > MODE_STALE_AFTER
+        return datetime.now(UTC) - self.observed_at > MODE_STALE_AFTER
 
 
 async def current_mode(pool: asyncpg.Pool, satellite_id: str) -> ModeReading | None:

@@ -9,7 +9,6 @@ import pytest
 
 from src.api.rbac import Role, require_role
 
-
 # ── require_role unit tests ────────────────────────────────────────────────────
 
 def test_admin_passes_admin_gate():

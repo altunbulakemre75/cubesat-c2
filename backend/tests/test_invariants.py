@@ -9,15 +9,16 @@ Bu dosya 3 grupla doludur:
 
 from __future__ import annotations
 
+from datetime import UTC
+
 import pytest
 
 from src.commands.models import (
-    Command,
-    CommandStatus,
     MAX_RETRIES,
     UNSAFE_RETRY_TYPES,
+    Command,
+    CommandStatus,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────
 # 1. Command state machine — invariants
@@ -104,9 +105,9 @@ def test_regression_anomaly_event_appevent_shape():
 
     Bug fixed in commit 61a3fde — without these fields, Dashboard.tsx
     crashed on event.type.toUpperCase()."""
-    import json
     import asyncio
-    from datetime import datetime, timezone
+    import json
+    from datetime import datetime
     from unittest.mock import AsyncMock, MagicMock
 
     from src.anomaly.detector import AnomalyEvent
@@ -121,7 +122,7 @@ def test_regression_anomaly_event_appevent_shape():
     ev = AnomalyEvent(
         satellite_id="X", parameter="battery_voltage_v",
         value=2.5, z_score=4.2, severity="critical",
-        detected_at=datetime.now(timezone.utc),
+        detected_at=datetime.now(UTC),
     )
     detector.feed.return_value = [ev]
 
@@ -133,9 +134,9 @@ def test_regression_anomaly_event_appevent_shape():
         async def __aexit__(self, *_): return None
     pool.acquire = lambda: _DbCtx()
 
-    from src.ingestion.models import CanonicalTelemetry, TelemetryParams, SatelliteMode
+    from src.ingestion.models import CanonicalTelemetry, SatelliteMode, TelemetryParams
     telem = CanonicalTelemetry(
-        timestamp=datetime.now(timezone.utc), satellite_id="X",
+        timestamp=datetime.now(UTC), satellite_id="X",
         source="ax25", sequence=1,
         params=TelemetryParams(
             battery_voltage_v=2.5, temperature_obcs_c=25.0,
@@ -200,6 +201,7 @@ def test_regression_stream_update_on_subject_drift():
     from existing ones. Source-level inspection — the function must
     contain 'update_stream'."""
     import inspect
+
     from src.ingestion import service
     src = inspect.getsource(service.ensure_stream)
     assert "update_stream" in src
@@ -208,6 +210,7 @@ def test_regression_stream_update_on_subject_drift():
 def test_regression_admin_bootstrap_writes_password_to_file_not_logs():
     """Logs must not contain the cleartext password. Source-level check."""
     import inspect
+
     from src.api import bootstrap
     src = inspect.getsource(bootstrap.ensure_admin_user)
     # Password must not be passed as a logger argument anywhere on the

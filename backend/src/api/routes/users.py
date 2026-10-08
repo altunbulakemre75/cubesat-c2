@@ -1,5 +1,5 @@
-from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel
 
 from src.api.audit import log_action
 from src.api.auth import end_all_sessions, hash_password

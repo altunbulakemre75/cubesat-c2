@@ -13,7 +13,7 @@ a silent no-op.
 
 import pytest
 
-from src.commands.models import Command, CommandStatus, _TRANSITIONS
+from src.commands.models import _TRANSITIONS, Command, CommandStatus
 
 
 def test_all_command_statuses_have_transitions_defined():

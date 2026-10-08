@@ -18,10 +18,10 @@ skyfield's data files (which require internet access on first load).
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
-from sgp4.api import Satrec, WGS84
+from sgp4.api import WGS84, Satrec
 
 
 @dataclass(frozen=True)
@@ -67,7 +67,7 @@ def _eci_to_geodetic(x: float, y: float, z: float, t: datetime) -> tuple[float, 
 
 def _datetime_to_jd(t: datetime) -> float:
     """Julian date from UTC datetime."""
-    t = t.astimezone(timezone.utc)
+    t = t.astimezone(UTC)
     y, m, d = t.year, t.month, t.day
     h = t.hour + t.minute / 60 + t.second / 3600 + t.microsecond / 3_600_000_000
     if m <= 2:
@@ -94,7 +94,7 @@ def propagate(tle_line1: str, tle_line2: str, t: datetime) -> SatellitePosition:
 def position_at(sat: Satrec, t: datetime) -> SatellitePosition:
     """Position from an already-parsed TLE. Parsing is the expensive part of
     propagate(); loops over many time steps should parse once and call this."""
-    t_utc = t.astimezone(timezone.utc)
+    t_utc = t.astimezone(UTC)
     jd = _datetime_to_jd(t_utc)
     jd_frac = jd % 1
 

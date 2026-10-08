@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 from fastapi.testclient import TestClient
@@ -80,7 +80,7 @@ def test_next_pass_over_an_uplink_station_is_used(db: Db, test_dsn: str) -> None
 
     row = _row(db, cmd)
     assert row["status"] == "scheduled"
-    expected = datetime.now(timezone.utc) + timedelta(minutes=30)
+    expected = datetime.now(UTC) + timedelta(minutes=30)
     assert abs((row["scheduled_at"] - expected).total_seconds()) < 60
 
 
@@ -93,7 +93,7 @@ def test_pass_already_in_progress_is_used_immediately(db: Db, test_dsn: str) -> 
 
     row = _row(db, cmd)
     assert row["status"] == "scheduled"
-    assert row["scheduled_at"] <= datetime.now(timezone.utc) + timedelta(seconds=5)
+    assert row["scheduled_at"] <= datetime.now(UTC) + timedelta(seconds=5)
 
 
 def test_inactive_uplink_station_is_ignored(db: Db, test_dsn: str) -> None:

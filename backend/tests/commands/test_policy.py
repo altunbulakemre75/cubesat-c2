@@ -1,4 +1,3 @@
-import pytest
 from src.commands.policy import evaluate
 from src.ingestion.models import SatelliteMode
 

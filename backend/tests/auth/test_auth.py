@@ -11,7 +11,8 @@ real database in tests/integration/test_auth_sessions.py.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from jose import JWTError, jwt
 
@@ -79,7 +80,7 @@ def test_decode_rejects_tampered_signature():
 
 def test_decode_rejects_expired_token():
     """Mint a token with negative TTL → JWTError on decode."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": "alice", "role": "admin", "kind": "access",
         "jti": "x", "iat": now - timedelta(hours=2),
@@ -95,8 +96,8 @@ def test_decode_rejects_token_signed_with_wrong_secret():
     payload = {
         "sub": "alice", "role": "admin", "kind": "access",
         "jti": "x",
-        "iat": datetime.now(timezone.utc),
-        "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+        "iat": datetime.now(UTC),
+        "exp": datetime.now(UTC) + timedelta(hours=1),
     }
     bogus = jwt.encode(payload, "totally-different-32-char-key-xxx",
                        algorithm=settings.jwt_algorithm)

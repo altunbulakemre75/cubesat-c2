@@ -15,8 +15,7 @@ sequences and broke on every query change.
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -75,7 +74,7 @@ def _make_scheduler() -> tuple[CommandScheduler, _FakePool, MagicMock]:
 @pytest.mark.asyncio
 async def test_schedule_once_uses_operator_supplied_scheduled_at():
     sched, pool, _ = _make_scheduler()
-    target = datetime.now(timezone.utc) + timedelta(minutes=5)
+    target = datetime.now(UTC) + timedelta(minutes=5)
     pool.conn.fetch.return_value = [
         {"id": "c1", "satellite_id": "SAT1",
          "scheduled_at": target, "command_type": "ping", "priority": 5}
@@ -96,7 +95,7 @@ async def test_schedule_once_uses_operator_supplied_scheduled_at():
 @pytest.mark.asyncio
 async def test_schedule_once_falls_back_to_next_pass_aos():
     sched, pool, _ = _make_scheduler()
-    aos = datetime.now(timezone.utc) + timedelta(minutes=12)
+    aos = datetime.now(UTC) + timedelta(minutes=12)
     pool.conn.fetch.return_value = [
         {"id": "c2", "satellite_id": "SAT2",
          "scheduled_at": None, "command_type": "ping", "priority": 5}
@@ -212,7 +211,7 @@ async def test_scheduler_priority_ordering_in_sql():
     """The SCHEDULE phase must order PENDING by priority ASC then created_at.
     Mock returns rows in that order; just verify the loop processes ALL."""
     sched, pool, _ = _make_scheduler()
-    target = datetime.now(timezone.utc) + timedelta(minutes=1)
+    target = datetime.now(UTC) + timedelta(minutes=1)
     pool.conn.fetch.return_value = [
         {"id": "c-high", "satellite_id": "SAT1",
          "scheduled_at": target, "command_type": "ping", "priority": 1},

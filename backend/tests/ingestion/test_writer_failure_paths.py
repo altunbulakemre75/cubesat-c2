@@ -9,19 +9,19 @@ Mock-driven, çünkü gerçek asyncpg/NATS startup'ı 10sn'lik test'e değmez.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import asyncpg
 import pytest
 
-from src.ingestion.models import CanonicalTelemetry, TelemetryParams, SatelliteMode
+from src.ingestion.models import CanonicalTelemetry, SatelliteMode, TelemetryParams
 from src.ingestion.writer import TelemetryWriter
 
 
 def _make_telem(sat_id: str = "SAT1", seq: int = 1) -> CanonicalTelemetry:
     return CanonicalTelemetry(
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         satellite_id=sat_id,
         source="ax25",
         sequence=seq,
@@ -198,7 +198,7 @@ async def test_queue_full_naks_for_backpressure():
     msg = MagicMock()
     msg.subject = "telemetry.canonical.X"
     msg.data = json.dumps({
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "satellite_id": "X", "source": "ax25", "sequence": 1,
         "params": {
             "battery_voltage_v": 3.9, "temperature_obcs_c": 25,

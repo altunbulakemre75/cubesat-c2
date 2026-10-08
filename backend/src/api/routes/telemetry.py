@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Query
 
@@ -19,7 +19,7 @@ async def get_telemetry(
     to_time: datetime | None = Query(default=None),
 ):
     if to_time is None:
-        to_time = datetime.now(timezone.utc)
+        to_time = datetime.now(UTC)
     if from_time is None:
         from_time = to_time - timedelta(hours=1)
 

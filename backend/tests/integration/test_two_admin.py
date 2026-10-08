@@ -10,6 +10,7 @@ was never actually waited for.
 from __future__ import annotations
 
 import asyncio
+
 import asyncpg
 import pytest
 from fastapi.testclient import TestClient

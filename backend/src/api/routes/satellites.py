@@ -1,12 +1,12 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 
 logger = logging.getLogger(__name__)
 from pydantic import BaseModel
-from sgp4.api import Satrec, WGS84
+from sgp4.api import WGS84, Satrec
 
 from src.api.audit import log_action
 from src.api.deps import CurrentUser, Pool
@@ -232,7 +232,7 @@ async def _compute_and_store_passes(pool, satellite_id: str, tle1: str, tle2: st
     ]
     # CPU-bound (one SGP4 sweep + per-station geometry): run it in a worker
     # thread so the API and WebSockets stay responsive meanwhile.
-    predicted_from = datetime.now(timezone.utc)
+    predicted_from = datetime.now(UTC)
     try:
         all_passes = await asyncio.to_thread(
             predict_passes_multi, satellite_id, tle1, tle2, stations,
@@ -307,4 +307,4 @@ def _parse_tle_epoch(tle_line1: str) -> datetime:
 
     day = int(day_of_year)
     frac = day_of_year - day
-    return datetime(year, 1, 1, tzinfo=timezone.utc) + timedelta(days=day - 1, seconds=frac * 86400)
+    return datetime(year, 1, 1, tzinfo=UTC) + timedelta(days=day - 1, seconds=frac * 86400)
