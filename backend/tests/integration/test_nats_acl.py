@@ -19,14 +19,14 @@ from __future__ import annotations
 
 import asyncio
 import os
-import uuid
 from collections.abc import AsyncIterator
 
 import nats
 import pytest
 from nats.aio.client import Client
 from nats.errors import NoServersError
-from nats.js.api import StreamConfig
+
+from src.ingestion.service import ensure_stream
 
 URL = os.environ.get("TEST_NATS_URL")
 BACKEND_PW = os.environ.get("TEST_NATS_BACKEND_PASSWORD", "")
@@ -81,14 +81,9 @@ async def _received(nc: Client, subject: str) -> list[bytes]:
 
 @pytest.fixture
 async def stream(backend: Client) -> AsyncIterator[str]:
-    name = f"acltest_{uuid.uuid4().hex[:6]}"
-    js = backend.jetstream()
-    await js.add_stream(StreamConfig(
-        name=name,
-        subjects=[f"telemetry.raw.{name}", f"commands.ack.{name}"],
-    ))
-    yield name
-    await js.delete_stream(name)
+    """The production stream, created the way the backend creates it."""
+    await ensure_stream(backend.jetstream())
+    yield "cubesat"
 
 
 async def test_anonymous_clients_are_refused() -> None:
@@ -105,14 +100,14 @@ async def test_wrong_password_is_refused() -> None:
 async def test_groundstation_can_hand_in_raw_frames_via_jetstream(
     groundstation: Client, stream: str,
 ) -> None:
-    ack = await groundstation.jetstream().publish(f"telemetry.raw.{stream}", b"frame")
+    ack = await groundstation.jetstream().publish("telemetry.raw.acltest", b"frame")
     assert ack.stream == stream
 
 
 async def test_groundstation_can_send_command_acks(
     groundstation: Client, stream: str,
 ) -> None:
-    ack = await groundstation.jetstream().publish(f"commands.ack.{stream}", b"{}")
+    ack = await groundstation.jetstream().publish("commands.ack.acltest", b"{}")
     assert ack.stream == stream
 
 
