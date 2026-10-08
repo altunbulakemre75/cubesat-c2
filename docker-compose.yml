@@ -53,7 +53,9 @@ services:
       - *secrets-ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cubesat}"]
+      # Over TCP: on first start the image runs a temporary, socket-only
+      # server for its init scripts, which a plain pg_isready reports as ready.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-cubesat} -d ${POSTGRES_DB:-cubesat_c2}"]
       interval: 10s
       timeout: 5s
       retries: 5

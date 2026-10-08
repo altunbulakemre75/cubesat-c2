@@ -76,7 +76,7 @@ spec:
               command:
                 - sh
                 - -c
-                - pg_isready -U $POSTGRES_USER
+                - pg_isready -h 127.0.0.1 -U $POSTGRES_USER
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
@@ -86,7 +86,7 @@ spec:
               command:
                 - sh
                 - -c
-                - pg_isready -U $POSTGRES_USER
+                - pg_isready -h 127.0.0.1 -U $POSTGRES_USER
             initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 3
