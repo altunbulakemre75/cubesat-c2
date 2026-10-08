@@ -32,5 +32,5 @@ done
 
 if [ "${1:-}" = "show" ]; then
     echo "Grafana  (http://localhost:3001)  user: admin  password: $(cat "$DIR/grafana_admin_password")"
-    echo "C2 admin: docker compose exec backend cat /tmp/cubesat_admin_bootstrap"
+    echo "C2 admin: docker compose exec backend cat /var/lib/cubesat/admin_bootstrap"
 fi

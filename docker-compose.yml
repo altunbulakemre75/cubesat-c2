@@ -139,9 +139,15 @@ services:
       - SEED_SATELLITES=["CUBESAT1","CUBESAT2","CUBESAT3"]
       - DEBUG=${DEBUG:-false}
       - LOG_LEVEL=INFO
+      # One-time admin password. On a volume, not /tmp: recreating the
+      # container (e.g. an image update) before the first login would
+      # otherwise lose it for good. Read it with:
+      #   docker compose exec backend cat /var/lib/cubesat/admin_bootstrap
+      - ADMIN_BOOTSTRAP_FILE=/var/lib/cubesat/admin_bootstrap
     volumes:
       - ./backend:/app
       - *secrets-ro
+      - backend-state:/var/lib/cubesat
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -241,6 +247,7 @@ services:
 
 volumes:
   cubesat-secrets:
+  backend-state:
   timescaledb-data:
   redis-data:
   nats-data:
