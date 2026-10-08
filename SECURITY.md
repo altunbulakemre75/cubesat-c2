@@ -52,23 +52,66 @@ In scope:
 - Insecure defaults (secrets, passwords, CORS)
 - Data exposure via logs or error messages
 
+- The default `docker-compose.yml` — it is the documented installation path,
+  so insecure defaults there are in scope
+
 Out of scope:
 - Denial of service via obvious self-hosted resource limits
-- Issues in the example `docker-compose.yml` used only for local development
 - Social engineering, physical attacks
+- The RF link itself (uplink/downlink authentication is a mission design
+  topic; see docs/ONERILER.md)
 - Vulnerabilities in unmodified third-party dependencies — please report
   those upstream (we handle CVE triage via Dependabot)
 
 ## Known security posture
 
-- JWT secret validator refuses weak values in production (see
-  `backend/src/config.py`)
-- Admin password is randomly generated on first startup and flagged
-  `must_change_password`
-- WebSocket endpoints require JWT and role verification
-- Passwords hashed with bcrypt (cost 12); no plaintext storage
-- Audit log is append-only and covers login, user mutation, and satellite deletion
-- Dependabot alerts + CodeQL scanning enabled on this repository
+- **Sessions**
+  - Every request is validated against the database: role, active flag,
+    token version and per-token revocation. Nothing is trusted from JWT claims
+    beyond identity, and Redis is not on the auth path.
+  - Role change, deactivation, password change and refresh-token replay end
+    all sessions of a user.
+- **WebSockets** use single-use 30-second tickets bound to the issuing session.
+  Open sockets are re-validated and closed when the session ends.
+- **RBAC.** Three roles: viewer, operator, admin. Critical commands
+  (`separation`, `factory_reset`) need a second, different admin.
+- **Message bus.** NATS requires authentication with least-privilege accounts.
+  The ground-station identity cannot publish uplink commands, canonical
+  telemetry or events, read telemetry, or use the JetStream API. Telemetry for
+  unregistered satellites is dropped.
+- **Deployment defaults**
+  - No default passwords: credentials are generated per install.
+  - Internal services (DB, Redis, NATS, Prometheus, Loki, raw API) bind to
+    localhost.
+  - The JWT secret validator refuses weak values.
+- **Login.** bcrypt password hashing. Login is rate-limited per client IP and
+  username, and `X-Forwarded-For` is only honoured from `TRUSTED_PROXIES`.
+- **Admin bootstrap.** The initial password is written to a 600-mode file on
+  a volume, never to logs. The admin must change it on first login, and the
+  file is deleted afterwards.
+- **Audit log.** Append-only, enforced by a database trigger. It covers
+  logins, user/role/active changes, command creation, approval, transitions and
+  cancellation, ground station changes, satellite deletion, SatNOGS station
+  imports and FDIR alert acknowledgements. (Satellite creation and TLE
+  uploads are not audited yet.) A database superuser can still disable the trigger.
+- **Dependencies.** Dependabot alerts and CodeQL scanning are enabled. CI runs
+  with a read-only `GITHUB_TOKEN`.
+
+### Known limitations
+
+- The uplink (`commands.<satellite>` on NATS) carries no command
+  authentication (e.g. HMAC). Anyone holding the ground-station credential, or
+  an RF transmitter, can talk to a satellite that doesn't authenticate commands
+  itself.
+- Kubernetes manifests are experimental and not hardened (no NetworkPolicies,
+  no TLS between services).
+- Traffic between services inside the compose network is not encrypted.
+
+## Advisories
+
+- **v0.1.0** — session validation, WebSocket authentication and message-bus
+  authorization flaws, reported by the DREAM Security Research Team. Fixed in
+  v0.1.1; see the GitHub Security Advisory and CHANGELOG.md.
 
 ## Thanks
 

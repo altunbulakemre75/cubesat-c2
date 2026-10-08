@@ -19,7 +19,9 @@ services:
   secrets:
     image: alpine:3.20
     container_name: cubesat-secrets
-    command: ["/bin/sh", "/init-secrets.sh"]
+    # entrypoint (not command) so `docker compose run --rm secrets show`
+    # passes "show" to the script.
+    entrypoint: ["/bin/sh", "/init-secrets.sh"]
     environment:
       # Optional overrides from .env; empty = keep/generate the stored value.
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}

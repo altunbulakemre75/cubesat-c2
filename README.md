@@ -1,69 +1,110 @@
 # CubeSat C2
 
-**Open-source satellite Command & Control — ready in 5 minutes, not 5 days.**
+**Open-source satellite Command & Control — one `docker compose up`, not two days of setup.**
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org)
-[![Tests](https://img.shields.io/badge/tests-88%20passing-brightgreen.svg)](#tests)
+[![CI](https://github.com/altunbulakemre75/cubesat-c2/actions/workflows/ci.yml/badge.svg)](https://github.com/altunbulakemre75/cubesat-c2/actions/workflows/ci.yml)
 [![Status](https://img.shields.io/badge/status-beta-orange.svg)](#status)
 
-A full-stack mission control system for CubeSats and small satellites. Paste a TLE, start Docker, and watch your satellite fly across a real-time 3D globe with pass predictions, command dispatch, and automatic fault detection.
+A mission control system for CubeSats and small satellites: real-time 3D tracking, pass
+prediction, a command lifecycle with safety policies, fault detection and an operator UI —
+self-hosted, with no vendor lock-in.
 
-> Built for university space clubs, small-satellite operators, and the Turkish space ecosystem — but useful anywhere you need to track and command an orbiting asset.
+> Built for university space clubs, small-satellite operators and the Turkish space
+> ecosystem — useful anywhere you need to track and command an orbiting asset.
 
 ---
 
 ## Why this project?
 
-The existing options are all painful:
-
 | Option | Problem |
 |---|---|
-| Commercial (STK, FreeFlyer) | Expensive, closed-source, students can't access |
-| OpenC3 COSMOS | Open-source but takes 2 days to set up — Ruby + Node.js + Redis + MinIO + Traefik |
+| Commercial (STK, FreeFlyer) | Expensive, closed-source, out of reach for students |
+| OpenC3 COSMOS | Open-source, but a heavy multi-service install |
 | Homemade Python scripts | Every team reinvents the wheel |
 
-**CubeSat C2** fills the gap: one `docker compose up`, five minutes, everything works. No vendor lock-in, no per-seat licensing, no 200-page install guide.
+CubeSat C2 aims at the gap: one command to a working stack with a simulator, so a team can
+learn the operations workflow before they have a satellite in orbit.
+
+---
+
+## Status
+
+**Beta (v0.1.x).** Read this before relying on it:
+
+- ✅ **End-to-end with the bundled simulator.** Telemetry ingest → storage → UI. Commands go
+  through approval → scheduling → transmission → satellite ACK → `acked`.
+- ✅ **Real orbits.** TLEs from Celestrak/SatNOGS, SGP4 pass prediction, a live globe, and
+  SatNOGS observation import.
+- ⚠️ **Real satellite telemetry is not decoded into the pipeline yet.** The protocol
+  adapters (AX.25, KISS, CCSDS) expect the simulator's JSON payload. Mission-specific binary
+  formats need a telemetry definition layer; that is the next major piece of work (see
+  [docs/ONERILER.md](docs/ONERILER.md)).
+- ⚠️ **No radio integration.** The uplink is a NATS subject (`commands.<sat>`); a ground
+  station bridge to an SDR/TNC has to consume it.
+- ⚠️ **Kubernetes manifests are experimental.** They have not been validated on a cluster.
+- ❌ **Edge / offline leaf-node operation** is designed ([docs/MIMARI.md](docs/MIMARI.md)) but
+  not implemented.
 
 ---
 
 ## Features
 
 ### Operations
-- **3D live globe** — real ECI→geodetic tracking via CesiumJS + satellite.js, 90-minute orbit trails
-- **Pass prediction** — SGP4 over ground stations (AOS/LOS, max elevation, azimuth)
-- **Command center** — state-machine lifecycle (pending → scheduled → transmitting → sent → acked / timeout / retry / dead)
-- **Policy engine** — mode-based command rejection (can't turn camera on in SAFE mode)
-- **FDIR monitor** — detects stale telemetry, battery critical, over-temp → publishes alerts
-- **Anomaly detection** — z-score on rolling window, warning at 2σ, critical at 3σ
+- **3D live globe.** CesiumJS + satellite.js with orbit trails.
+- **Pass prediction.** SGP4 over every ground station in a single sweep. Passes over
+  stations that can transmit are marked as uplink windows; SatNOGS stations are receive-only.
+- **Command lifecycle.**
+  - States: `awaiting_approval → pending → scheduled → transmitting → sent → acked`, with
+    `timeout → retry` and `dead`.
+  - Commands only go out inside an uplink window, unless the operator sets the time.
+  - Retries back off 1 s / 4 s / 16 s (max 3).
+  - A timeout caused by loss of signal (LOS) doesn't count as a retry.
+  - A satellite NACK is final.
+- **Two-admin approval.** `separation` and `factory_reset` wait until a *different* admin
+  approves them.
+- **Policy engine.** Mode-based command restrictions, checked when a command is queued and
+  again just before transmission.
+  - If the mode is unknown or stale (no telemetry for 2 h), the operator must explicitly
+    confirm.
+- **Idempotent submission.** Repeating a request with the same `idempotency_key` returns
+  the original command.
+- **FDIR monitor.** Checks battery and temperature thresholds and missing fields.
+  - Staleness is pass-aware: being out of view isn't a fault, but a pass over our own
+    station without telemetry is.
+  - One alert per fault, with no duplicates after a restart.
+  - FDIR raises alerts; it does **not** autonomously command safe mode. The operator
+    decides.
+- **Anomaly detection.** Statistical z-score on a rolling window with hysteresis and
+  cooldown (no ML).
 
 ### Data pipeline
-- **Protocol adapters** — AX.25 implemented, KISS/CCSDS skeletons; plugin registry for custom protocols
-- **NATS JetStream** — durable message bus with one stream, four subjects (telemetry.raw.*, telemetry.canonical.*, commands.*, events.*)
-- **TimescaleDB hypertable** — telemetry partitioned by time, SQL queries fast on millions of rows
-- **Redis cache** — last-known-value + mode lookup for policy decisions
+- **NATS JetStream message bus.** One stream with 7-day retention; durable consumers.
+- **TimescaleDB** hypertable for telemetry; Redis is only a cache.
+- **Single leader.** With several workers or replicas, the background services (ingestion,
+  scheduler, FDIR, TLE refresh) run on one elected leader (Postgres advisory lock).
 
 ### Operator UI
-- **Dashboard** — live globe + satellite cards + alert feed + event stream
-- **Satellite detail** — real-time telemetry charts (Recharts), command history, passes, anomalies
-- **Pass schedule** — Gantt-style 24h timeline across all stations
-- **User management** — viewer / operator / admin roles, runtime role changes
+- **Dashboard** with globe, satellite cards and a live alert feed.
+- **Satellite detail** with live charts, command history, passes and anomalies.
+- **Command center** with approve/reject for critical commands and policy feedback.
+- **Pass schedule:** a 24 h timeline that highlights uplink windows.
+- **User management:** roles, and disabling an account (ends its sessions immediately).
 
 ### Security
-- **JWT + bcrypt** — no plaintext passwords anywhere
-- **RBAC** — three roles with route-level enforcement (16 boundary tests)
-- **WebSocket auth** — token validation on every stream, events locked to operator+
-- **Random admin bootstrap** — password generated on first startup, forced rotation on first login
-- **JWT secret hardening** — refuses to start in production with weak/default values
-- **Audit log** — login success/failure, user creation, role changes, satellite deletion
-
-### SatNOGS integration
-- Pull real TLEs by NORAD ID from SatNOGS / Celestrak
-- Auto-compute pass windows for all active ground stations
-- Import SatNOGS ground stations by country
-
-### Edge operation
-- NATS leaf node architecture documented — local station runs through internet loss, syncs on reconnect *(not yet deployed; design in docs/MIMARI.md)*
+See [SECURITY.md](SECURITY.md) for the full posture. In short:
+- **Sessions.** Every request is checked against the database (role, active flag,
+  revocation, token version). Demotion, deactivation, password change and logout take
+  effect immediately. Refresh tokens rotate, and a replayed one ends the session family.
+- **WebSockets** use 30-second single-use tickets bound to the session and are re-validated
+  while open.
+- **NATS** requires authentication. The ground-station identity can only hand in raw
+  frames and ACKs and read the uplink queue.
+- **No default passwords.** Credentials are generated per install. Internal services listen
+  on localhost only.
+- **Login** is rate-limited; `X-Forwarded-For` is only trusted from the configured proxy.
+- **Audit log** is append-only, enforced by the database.
 
 ---
 
@@ -78,91 +119,85 @@ The existing options are all painful:
 ### Command center — policy-gated dispatch
 ![Command modal with SAFE mode restrictions](docs/screenshots/03-command-center.png)
 
-### Pass schedule — 24h Gantt across ground stations
-![Gantt-style pass timeline](docs/screenshots/04-pass-schedule.png)
+### Pass schedule — 24h timeline across ground stations
+![Pass timeline](docs/screenshots/04-pass-schedule.png)
 
 ---
 
 ## Quick start
 
-Requirements: Docker + Docker Compose. That's it.
+Requirements: Docker with Docker Compose.
 
 ```bash
 git clone https://github.com/altunbulakemre75/cubesat-c2.git
 cd cubesat-c2
-cp .env.example .env
-
-# Generate a JWT secret
-python -c "import secrets; print('JWT_SECRET_KEY=' + secrets.token_urlsafe(32))" >> .env
-
-docker compose up -d timescaledb redis nats
-docker compose up -d backend simulator
+docker compose up -d
 ```
 
-Watch the backend logs for the **auto-generated admin password**:
+On first start, a one-shot `secrets` service generates every credential (database, Redis,
+NATS, JWT key, Grafana). Nothing ships with a default password.
+
+Read the one-time admin password:
 
 ```bash
-docker compose logs backend | grep Password
+docker compose exec backend cat /var/lib/cubesat/admin_bootstrap
 ```
 
-You'll see a one-time banner like:
+Then:
+1. Open `http://localhost:3000` and log in as `admin`.
+2. Set your own password. The bootstrap file is deleted after that.
 
-```
-INITIAL ADMIN USER CREATED
-  Username: admin
-  Password: YJwKu75jIV38FIjed1m5vQ
-  YOU MUST CHANGE THIS PASSWORD ON FIRST LOGIN
-```
+The simulator publishes telemetry for three CubeSats (`CUBESAT1`, `CUBESAT2`, `CUBESAT3`),
+and they show up on the dashboard within seconds. They also accept commands such as `ping`,
+`mode_change` (`{"mode": "science"}`) and `recovery`, and ACK them.
 
-Then start the frontend:
+| What | Where |
+|---|---|
+| Operator UI | `http://localhost:3000` (reachable from your network) |
+| Grafana | `http://localhost:3001` — password: `docker compose run --rm secrets show` |
+| API docs | `http://localhost:8000/docs` (this machine only) |
+| Prometheus | `http://localhost:9090` (this machine only) |
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open `http://localhost:3000`, log in with the password above, set a new one, and you're in.
-
-The simulator is already publishing telemetry for three fake CubeSats (`CUBESAT1`, `CUBESAT2`, `CUBESAT3`). You'll see them on the dashboard within seconds.
+> **Upgrading from v0.1.0 with an existing database volume?** The database keeps its old
+> password. Put it in `.env` (e.g. `POSTGRES_PASSWORD=devpassword`) before the first start.
+> See [CHANGELOG.md](CHANGELOG.md).
 
 ### Track a real satellite
 
 ```bash
-# Get a token
 TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"YOUR_NEW_PASSWORD"}' \
+  -d '{"username":"admin","password":"YOUR_PASSWORD"}' \
   | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 
-# Sync ISS TLE from SatNOGS
+# Register the ISS and pull its TLE
 curl -X POST "http://localhost:8000/satnogs/sync/ISS?norad_id=25544" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-Within 15 seconds, the ISS will appear on your 3D globe with a computed orbit trail, and the Pass Schedule page will list the next ISS passes over your configured ground stations.
+The ISS appears on the globe with an orbit trail, and the pass schedule lists its passes
+over your ground stations. Add your own station with `POST /stations` (uplink-capable by
+default), or import SatNOGS stations (receive-only).
 
 ---
 
 ## Architecture
 
-Seven vertical layers, two cross-cutting (observability + security + edge):
-
 ```
-External sources (SatNOGS, TLE, SDR)
+External sources (SatNOGS, Celestrak, ground station / simulator)
               ↓
-Protocol adapters  — AX.25, KISS, CCSDS, custom plugins
+Protocol adapters — AX.25, KISS, CCSDS (registry, pluggable)
               ↓
-Business logic  — orbit, FDIR, command lifecycle, policy engine
+NATS JetStream — telemetry.raw.*, telemetry.canonical.*, commands.*, events.*
               ↓
-NATS JetStream  — telemetry.*, commands.*, events.*
+Leader-elected services — ingestion, writer, scheduler, FDIR, TLE refresh
               ↓
-TimescaleDB + Redis + FastAPI + WebSocket
+TimescaleDB (+ Redis cache) ← FastAPI + WebSocket (every worker)
               ↓
-React + CesiumJS operator UI
+React + CesiumJS operator UI (served by nginx, which proxies /api and /ws)
 ```
 
-Full diagram with sub-system breakdowns: [docs/MIMARI.md](docs/MIMARI.md)
+Subsystem diagrams and rationale: [docs/MIMARI.md](docs/MIMARI.md)
 
 ---
 
@@ -173,110 +208,78 @@ Full diagram with sub-system breakdowns: [docs/MIMARI.md](docs/MIMARI.md)
 | Backend | Python 3.11, FastAPI, Pydantic v2, asyncpg |
 | Orbital mechanics | sgp4, skyfield |
 | Message bus | NATS JetStream |
-| Database | TimescaleDB (Postgres hypertable) |
+| Database | TimescaleDB (PostgreSQL) |
 | Cache | Redis |
-| Frontend | React 18 + Vite + TypeScript (strict) |
-| 3D globe | CesiumJS + satellite.js |
-| Charts | Recharts |
-| Styling | TailwindCSS |
-| Observability | Prometheus + Grafana (dashboards included) |
-| Container | Docker Compose (dev), Kubernetes manifests (prod) |
-| CI | GitHub Actions (backend pytest + frontend tsc + docker build) |
+| Frontend | React 18, Vite, TypeScript (strict), TailwindCSS |
+| 3D globe / charts | CesiumJS + satellite.js / Recharts |
+| Observability | Prometheus, Grafana, Loki |
+| Deployment | Docker Compose; Kubernetes manifests (experimental) |
+| CI | GitHub Actions — ruff, mypy --strict, pytest (with real TimescaleDB + NATS), vitest, build, Playwright |
 
 ---
 
 ## Tests
 
-88 tests passing — run locally:
-
 ```bash
-cd backend && pytest tests/ -v
-cd simulator && pytest tests/ -v
+# backend unit tests
+cd backend && pytest
+
+# backend integration tests (real database and message bus)
+docker run -d --name cubesat-testdb -e POSTGRES_PASSWORD=test \
+  -p 127.0.0.1:55432:5432 timescale/timescaledb:latest-pg16
+TEST_DATABASE_URL=postgresql://postgres:test@127.0.0.1:55432/postgres pytest
+# NATS ACL tests: see backend/tests/integration/test_nats_acl.py
+
+cd simulator && pytest
+cd frontend && npm test
 ```
 
-Coverage:
-- Protocol adapters (AX.25 decode, registry)
-- Command state machine + policy engine
-- Anomaly detector z-score
-- Orbit propagation round-trip
-- Simulator state machine + AX.25 framing
-- RBAC boundary tests (viewer/operator/admin across routes)
-- JWT encode/decode + password hash/verify
+Integration tests run the real FastAPI app against TimescaleDB and NATS (with the repository's
+ACL file). They skip automatically when those aren't configured; CI always runs them.
 
 ---
 
 ## API
 
-FastAPI auto-generated docs at `http://localhost:8000/docs`.
-
-Key endpoints:
+FastAPI docs at `http://localhost:8000/docs`. Highlights:
 
 ```
-POST   /auth/login                       → JWT + must_change_password flag
-POST   /auth/change-password
-GET    /satellites
-POST   /satellites
-DELETE /satellites/{id}                  (admin)
-POST   /satellites/{id}/tle              (operator, sgp4 validated)
-GET    /telemetry/{id}?limit=100
-POST   /commands                         (policy-gated)
-GET    /passes?satellite_id=&from=
-POST   /stations                         (admin)
-POST   /users                            (admin, min 12-char password)
-PATCH  /users/{name}/role                (admin, can't demote last admin)
-POST   /satnogs/sync/{id}?norad_id=      (operator)
+POST   /auth/login | /auth/refresh | /auth/logout | /auth/change-password
+POST   /auth/ws-ticket                     single-use WebSocket ticket (30 s)
+GET    /satellites            POST /satellites            DELETE /satellites/{id} (admin)
+POST   /satellites/{id}/tle                (operator; satellite must be registered)
+GET    /telemetry/{id}
+POST   /commands                           policy-gated, idempotent
+POST   /commands/{id}/approve              second admin for critical commands
+PATCH  /commands/{id}/transition           manual override (race-safe)
+GET    /passes?satellite_id=               includes uplink_capable
+POST   /stations                           (admin)
+PATCH  /users/{name}/role | /users/{name}/active   (admin)
+GET    /fdir/alerts           POST /fdir/alerts/{id}/ack
 
-WS     /ws/telemetry/{id}?token=         live telemetry stream
-WS     /ws/events?token=                 FDIR + anomaly events (operator+)
+WS     /ws/telemetry/{id}?ticket=          live telemetry
+WS     /ws/events?ticket=                  FDIR + anomaly events (operator+)
 ```
-
----
-
-## Target audience
-
-- **University space clubs** — ODTÜ, İTÜ, Boğaziçi, and international
-- **Small satellite operators** — companies like Plan-S, Fergani Space in Turkey; similar teams worldwide
-- **Amateur radio / satellite hobbyists** — SatNOGS community, AMSAT
-- **Research projects** — earth observation, space weather, IoT constellations
-
----
-
-## Status
-
-**Beta.** Core pipeline is battle-tested locally (simulator → NATS → adapter → DB → frontend with real ISS TLE integration verified), but not yet run against real radio hardware. Contributions welcome to add:
-
-- SDR ingestion (gr-satellites bridge)
-- More protocol adapters (USLP, Mobitex)
-- Mission planning across multiple ground stations
-- Edge leaf-node production deployment
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-**Adding a custom protocol adapter** takes less than 100 lines — no core changes needed, just drop a file in `backend/src/ingestion/adapters/` and register it.
-
----
+See [CONTRIBUTING.md](CONTRIBUTING.md). A new protocol adapter is a single file in
+`backend/src/ingestion/adapters/` plus a registry entry.
 
 ## Documentation
 
-- [Architecture deep dive](docs/MIMARI.md) — 8 subsystem diagrams, design rationale
-- [Getting started guide](docs/GETTING_STARTED.md)
-- [Development roadmap](docs/YOL_HARITASI.md)
-- [Security notes](docs/KOD_REVIEW_NOTLARI.md)
-
----
+- [Architecture](docs/MIMARI.md)
+- [Getting started](docs/GETTING_STARTED.md)
+- [Roadmap](docs/YOL_HARITASI.md) and [proposals](docs/ONERILER.md)
+- [Security policy](SECURITY.md) · [Changelog](CHANGELOG.md)
 
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE).
 
----
-
 ## Author
 
-[Emre Altunbulak](https://github.com/altunbulakemre75) — solo developer, opening a door to the Turkish space ecosystem.
-
-If you deploy this in your university or company, I'd love to hear about it. Open an issue or find me on LinkedIn.
+[Emre Altunbulak](https://github.com/altunbulakemre75). If you deploy this in your
+university or company, I'd love to hear about it — open an issue.

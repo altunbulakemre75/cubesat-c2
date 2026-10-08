@@ -4,22 +4,28 @@ Bu doküman projenin tüm geliştirme fazlarını ve alt adımlarını içerir. 
 
 ---
 
-## Genel Durum (Nisan 2026)
+## Genel Durum (Ekim 2026, v0.1.1)
+
+Aşağıdaki faz listeleri ilk planlamadan kalmadır. Alt checklist'ler tek tek
+işaretlenmedi; gerçek durum bu tablodadır.
 
 | Faz | Konu | Durum | Not |
 |-----|------|-------|-----|
-| 0 | Kurulum | ✅ Tamamlandı | Docker, Python, Node hazır |
-| 1 | Çekirdek Veri Akışı | ✅ Tamamlandı | Sim → NATS → Writer (batch) → Timescale |
-| 2 | Pipeline Sağlamlaştırma | ✅ Tamamlandı | Multi-adapter (AX.25/KISS/CCSDS), JetStream durable, NAK on failure |
-| 3 | Komut & Kontrol | ✅ Tamamlandı | RBAC, JWT refresh+logout, two-admin approval, state machine |
-| 4 | Görselleştirme | ✅ Tamamlandı | Cesium globe, Recharts, WS streams, anomaly toasts |
-| 5 | Operasyonel Olgunluk | ✅ Tamamlandı | Anomaly detector wired, FDIR, Celestrak refresher, Loki + Prometheus + Grafana |
-| 6 | Açık Kaynak Yayını | ✅ Tamamlandı | v0.1.0 tagli, Apache 2.0, SECURITY.md, GitHub güvenlik özellikleri |
+| 0 | Kurulum | ✅ | Tek komutla compose; secret'lar otomatik üretiliyor |
+| 1 | Çekirdek veri akışı | ✅ simülatörle | Sim → NATS → ingestion → writer → TimescaleDB. Gerçek uydu paket formatları için tanım katmanı yok (bkz. ONERILER.md §1) |
+| 2 | İş mantığı | ✅ | Yörünge/geçiş, uplink pencereleri, komut yaşam döngüsü (backoff, LOS koruması, NACK), politika motoru (yürütmede de), iki admin onayı, geçişe duyarlı FDIR |
+| 3 | API ve frontend | ✅ | JWT (DB doğrulamalı oturumlar), RBAC, WS biletleri, audit (DB'de append-only), Cesium UI |
+| 4 | Görünürlük ve dağıtım | 🟡 | Prometheus/Grafana/Loki çalışıyor; K8s manifestleri doğrulanmadı; CI'da ruff + mypy --strict + gerçek DB/NATS testleri |
+| 5 | Topluluk | 🟡 | Public repo, SECURITY.md; ilk dış güvenlik raporu v0.1.1'de kapatıldı |
+| — | Edge / leaf node | ❌ | Tasarım MIMARI.md'de; uygulanmadı |
+| — | Gerçek radyo / SDR | ❌ | Uplink bir NATS konusu; köprü yazılmadı |
 
-**Bilinen tamamlanmamış noktalar:**
-- HF/UHF gerçek radyo entegrasyonu (donanım bekleniyor)
-- Production K8s deploy (şu an docker-compose-only)
-- E2E testler (sadece backend unit + frontend Vitest var)
+### v0.2 hedefi
+Bkz. [ONERILER.md](ONERILER.md):
+
+1. Görev tanım dosyası (TOML) ile gerçek paket formatları, limitler ve komutlar
+2. Yörüngedeki gerçek bir uyduyla uçtan uca demo
+3. Uplink komut doğrulaması (HMAC + sayaç)
 
 ---
 

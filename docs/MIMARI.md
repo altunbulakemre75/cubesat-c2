@@ -373,3 +373,44 @@ Geliştirme, test ve üretim aynı kod.
 | F | Görev planlama | Pre/In/Post-pass |
 | G | Edge / offline | Leaf node + senkronizasyon |
 | H | Dağıtım | Docker + Kubernetes + gözlem |
+
+---
+
+## Uygulama Notları (v0.1.1)
+
+Tasarımın koddaki karşılığı ve bilinçli sapmalar:
+
+- **FDIR otomatik safe mode göndermez.** Alarm üretir (`fdir_alerts` +
+  `events.fdir.*`); safe mode komutunu operatör verir. Gerekçe: kayıplı RF hattında yanlış
+  pozitif bir tetikleme kurtarılamaz bir duruma yol açabilir. Diyagram C'deki "Safe mode
+  komutu" adımı bu nedenle insan onaylıdır.
+- **FDIR geçişlere duyarlıdır.** Pass tahmini olan bir uydu için arıza, "kendi
+  istasyonumuzun üzerinden geçti ama telemetri gelmedi" demektir; görüş dışında olmak arıza
+  değildir. Pass tahmini olmayan (sürekli bağlantılı) uydularda 10 dakikalık yaş kuralı
+  geçerlidir.
+- **Komut zamanlaması yalnızca uplink yapabilen istasyonların geçişlerini kullanır.**
+  SatNOGS istasyonları yalnızca alıcıdır. Kaçırılan pencere yeniden planlanır. Retry
+  backoff'u 1/4/16 sn'dir ve LOS sonrası timeout retry sayımına girmez (diyagram C'deki
+  kurallar). Uydu NACK'i nihaidir.
+- **Politika motoru iki kez çalışır:** komut kuyruğa alınırken ve yayından hemen önce. Mod
+  bilgisi 2 saatten eskiyse (bölüm D'deki "stale" kuralı) operatörün açık onayı gerekir.
+- **Güvenlik (bölüm E):**
+  - Oturum geçerliliği her istekte Postgres'ten okunur: rol, aktiflik, `token_version`,
+    iptal edilmiş token listesi. Redis kimlik doğrulama kararında yer almaz.
+  - WebSocket'ler tek kullanımlık, 30 saniyelik biletlerle açılır.
+  - Audit log bir trigger ile değiştirilemez hâle getirilmiştir.
+- **NATS (bölüm B):** İki kimlik vardır.
+  - `backend`: veri yolunun sahibidir.
+  - `groundstation`: yalnızca `telemetry.raw.>` ve `commands.ack.>` konularına yayın
+    yapabilir, `commands.<uydu>` konularını okuyabilir. JetStream API'sine, kanonik
+    telemetriye ve olaylara erişimi yoktur.
+  - Kayıtsız uydu ID'li çerçeveler ingestion aşamasında düşürülür.
+- **Ölçekleme (bölüm H):** Her worker/replika HTTP ve WebSocket sunar. Arka plan servisleri
+  (ingestion, writer, scheduler, FDIR, TLE yenileme, SatNOGS) Postgres advisory lock ile
+  seçilen **tek bir liderde** çalışır. Migration'lar kilit altında uygulanır.
+- **Henüz uygulanmayanlar:**
+  - edge / leaf node (bölüm G);
+  - gerçek radyo köprüsü;
+  - görev tanım dosyası ile mission'a özel paket çözme.
+
+  Bkz. [ONERILER.md](ONERILER.md).
