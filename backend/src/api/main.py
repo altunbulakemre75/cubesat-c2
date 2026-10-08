@@ -9,20 +9,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from src.anomaly.detector import AnomalyDetector
+from src.api.background import BackgroundServices
 from src.api.bootstrap import ensure_admin_user, ensure_seed_satellites
 from src.api.routes import anomalies, auth, commands, fdir, passes, satnogs, satellites, stations, telemetry, users
 from src.api.ws import close_shared_nats, router as ws_router
 from src.config import settings
-from src.fdir.monitor import FDIRMonitor
-from src.ingestion.celestrak import CelestrakRefresher
-from src.ingestion.satnogs_fetcher import SatnogsTelemetryFetcher
-from src.ingestion.service import IngestionService, ensure_stream
-from src.ingestion.writer import TelemetryWriter
-from src.scheduler import CommandScheduler
 from src.storage.db import close_pool, get_pool
+from src.storage.leader import LeaderElector
 from src.storage.migrations import run_migrations
-from src.storage.nats_conn import connect_nats
 from src.storage.redis_client import close_client
 
 logging.basicConfig(
@@ -31,64 +25,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-_background_tasks: list[asyncio.Task] = []
-
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # ── startup ──────────────────────────────────────────────────────────────
     pool = await get_pool()
-    await run_migrations(pool)
+    await run_migrations(pool)          # serialized across workers
     await ensure_admin_user(pool)
     await ensure_seed_satellites(pool, settings.seed_satellites)
 
-    nc = await connect_nats()
-    js = nc.jetstream()
-
-    await ensure_stream(js)
-
-    ingestion = IngestionService(js, protocol="ax25", pool=pool)
-    _background_tasks.append(asyncio.create_task(ingestion.run(), name="ingestion"))
-
-    # Anomaly detector is shared between writer (per-packet feed) and any
-    # future API endpoint that wants to query its state.
-    detector = AnomalyDetector()
-
-    writer = TelemetryWriter(js, pool, detector=detector)
-    _background_tasks.append(asyncio.create_task(writer.run(), name="writer"))
-
-    # FDIR monitor: periodic background task that scans Redis cache for stale
-    # telemetry / out-of-bounds values and publishes events.fdir.* on NATS.
-    fdir = FDIRMonitor(pool, js, check_interval_s=60.0)
-    _background_tasks.append(asyncio.create_task(fdir.run(), name="fdir"))
-
-    # Celestrak TLE auto-refresh: every 6h, pull fresh TLEs for any satellite
-    # that has a NORAD ID. Was manual-only; now self-healing.
-    celestrak = CelestrakRefresher(pool)
-    _background_tasks.append(asyncio.create_task(celestrak.run(), name="celestrak"))
-
-    # Command scheduler: drives PENDING→SCHEDULED→TRANSMITTING→SENT→ACKED
-    # via pass_schedule + NATS commands.* + commands.ack.* subjects.
-    scheduler = CommandScheduler(pool, js)
-    _background_tasks.append(asyncio.create_task(scheduler.run(), name="scheduler"))
-
-    # SatNOGS DB telemetry fetcher: pulls real demodulated frames from
-    # amateurs around the world for any satellite that has a NORAD ID.
-    satnogs_fetcher = SatnogsTelemetryFetcher(pool)
-    _background_tasks.append(asyncio.create_task(satnogs_fetcher.run(), name="satnogs_fetcher"))
-
-    logger.info(
-        "CubeSat C2 API started — ingestion + writer + anomaly + FDIR + "
-        "Celestrak + scheduler + SatNOGS fetcher running"
-    )
+    # Every worker serves HTTP/WebSockets; the background services run in
+    # exactly one process across all workers and replicas.
+    services = BackgroundServices(pool)
+    elector = LeaderElector(settings.asyncpg_dsn, services.start, services.stop)
+    election = asyncio.create_task(elector.run(), name="leader-election")
+    logger.info("CubeSat C2 API started (background services run on the elected leader)")
 
     yield
 
     # ── shutdown ─────────────────────────────────────────────────────────────
-    for task in _background_tasks:
-        task.cancel()
-    await asyncio.gather(*_background_tasks, return_exceptions=True)
-    await nc.close()
+    election.cancel()
+    await asyncio.gather(election, return_exceptions=True)
     await close_shared_nats()
     await close_pool()
     await close_client()
