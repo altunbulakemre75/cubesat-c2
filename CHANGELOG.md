@@ -69,6 +69,18 @@ found while fixing them. Details are in the GitHub Security Advisory.
 - **Ingestion** NAKs raw frames it couldn't publish, and the writer applies real
   backpressure.
 
+### Found in end-to-end testing
+- The first `docker compose up` on fresh volumes could abort the backend while Postgres was
+  still initializing (health check over TCP, startup retries).
+- Local `.env`/`.venv` files leaked into Docker images (missing `.dockerignore`): the UI
+  bundle pointed at `localhost:8000` and broke from other machines.
+- `GET /satnogs/observations` returned 500 once observations existed; the metadata was
+  double-encoded JSON (fixed, existing rows repaired by migration 010).
+- The satellite page requested a non-existent telemetry endpoint; charts now start with
+  history and keep growing with live data.
+- The 3D globe works without a Cesium Ion account (bundled offline imagery) and falls back
+  to it when a token is rejected.
+
 ### Developer experience
 - Integration tests run against real TimescaleDB and NATS (CI service containers).
 - ruff and `mypy --strict` are clean and enforced in CI for the backend and the simulator.

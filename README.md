@@ -52,7 +52,9 @@ learn the operations workflow before they have a satellite in orbit.
 ## Features
 
 ### Operations
-- **3D live globe.** CesiumJS + satellite.js with orbit trails.
+- **3D live globe.** CesiumJS + satellite.js with orbit trails. Works without a Cesium
+  account (bundled offline imagery); set `VITE_CESIUM_TOKEN` in `.env` for
+  high-resolution imagery.
 - **Pass prediction.** SGP4 over every ground station in a single sweep. Passes over
   stations that can transmit are marked as uplink windows; SatNOGS stations are receive-only.
 - **Command lifecycle.**
