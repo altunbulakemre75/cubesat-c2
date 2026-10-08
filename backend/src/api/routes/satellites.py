@@ -232,10 +232,11 @@ async def _compute_and_store_passes(pool, satellite_id: str, tle1: str, tle2: st
     ]
     # CPU-bound (one SGP4 sweep + per-station geometry): run it in a worker
     # thread so the API and WebSockets stay responsive meanwhile.
+    predicted_from = datetime.now(timezone.utc)
     try:
         all_passes = await asyncio.to_thread(
             predict_passes_multi, satellite_id, tle1, tle2, stations,
-            datetime.now(timezone.utc), 48,
+            predicted_from, 48,
         )
     except Exception as exc:  # noqa: BLE001
         # Keep the existing schedule rather than wiping it on a bad TLE.
@@ -245,11 +246,28 @@ async def _compute_and_store_passes(pool, satellite_id: str, tle1: str, tle2: st
     async with pool.acquire() as conn:
         # Atomic: always DELETE old passes first (so stale predictions don't
         # survive a TLE update that produces zero passes), then INSERT new
-        # ones. Both in one transaction for rollback safety.
+        # ones. Both in one transaction for rollback safety. Passes that have
+        # already started are history, not predictions: keep a week of them
+        # (FDIR's missed-pass check needs the last completed pass).
         async with conn.transaction():
             await conn.execute(
-                "DELETE FROM pass_schedule WHERE satellite_id = $1", satellite_id
+                "DELETE FROM pass_schedule WHERE satellite_id = $1 "
+                "AND (aos > NOW() OR los < NOW() - interval '7 days')",
+                satellite_id,
             )
+            # A pass in progress was kept above with its true AOS; drop the
+            # re-predicted copy that starts at "now" for the same station.
+            in_progress = {
+                r["station_id"] for r in await conn.fetch(
+                    "SELECT station_id FROM pass_schedule "
+                    "WHERE satellite_id = $1 AND aos <= NOW() AND los > NOW()",
+                    satellite_id,
+                )
+            }
+            all_passes = [
+                p for p in all_passes
+                if not (p.station.id in in_progress and p.aos <= predicted_from)
+            ]
             if not all_passes:
                 return
             await conn.executemany(

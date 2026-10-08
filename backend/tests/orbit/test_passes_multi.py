@@ -59,7 +59,9 @@ def test_tle_is_parsed_once_for_all_stations() -> None:
 
 
 class _Conn:
-    async def fetch(self, *_a: Any) -> list[dict[str, Any]]:
+    async def fetch(self, sql: str, *_a: Any) -> list[dict[str, Any]]:
+        if "FROM ground_stations" not in sql:
+            return []  # e.g. the in-progress pass lookup
         return [{"id": 1, "name": "GS", "latitude_deg": 39.9, "longitude_deg": 32.8,
                  "elevation_m": 0.0, "min_elevation_deg": 10.0}]
 
