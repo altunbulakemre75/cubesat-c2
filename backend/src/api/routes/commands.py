@@ -1,6 +1,7 @@
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query, status
+import asyncpg
+from fastapi import APIRouter, HTTPException, Query, Response, status
 from pydantic import BaseModel
 
 from src.api.audit import log_action
@@ -30,7 +31,7 @@ class TransitionRequest(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("", response_model=CommandOut, status_code=status.HTTP_201_CREATED)
-async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser):
+async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser, response: Response):
     require_role(Role.OPERATOR, user["role"])
 
     # Admin-only commands require admin role
@@ -42,6 +43,15 @@ async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser):
     needs_approval = body.command_type in TWO_ADMIN_COMMANDS
     if needs_approval:
         require_role(Role.ADMIN, user["role"])
+
+    # A retried request (same idempotency key) gets the original command
+    # back — before any other check, since e.g. the satellite's mode may
+    # have changed since the first attempt was accepted.
+    if body.idempotency_key:
+        existing = await _replay_of(pool, body, user["username"])
+        if existing is not None:
+            response.status_code = status.HTTP_200_OK
+            return existing
 
     async with pool.acquire() as conn:
         if not await conn.fetchval(
@@ -60,23 +70,31 @@ async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser):
     )
 
     cmd_id = str(uuid.uuid4())
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO commands (
-                id, satellite_id, command_type, params, priority,
-                safe_retry, idempotency_key, created_by, scheduled_at, status,
-                scheduled_manually
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-            RETURNING *
-            """,
-            cmd_id, body.satellite_id, body.command_type,
-            body.params if body.params else {},
-            body.priority, body.safe_retry, body.idempotency_key,
-            user["username"], body.scheduled_at,
-            (CommandStatus.AWAITING_APPROVAL if needs_approval else CommandStatus.PENDING).value,
-            body.scheduled_at is not None,
-        )
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO commands (
+                    id, satellite_id, command_type, params, priority,
+                    safe_retry, idempotency_key, created_by, scheduled_at, status,
+                    scheduled_manually
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                RETURNING *
+                """,
+                cmd_id, body.satellite_id, body.command_type,
+                body.params if body.params else {},
+                body.priority, body.safe_retry, body.idempotency_key,
+                user["username"], body.scheduled_at,
+                (CommandStatus.AWAITING_APPROVAL if needs_approval else CommandStatus.PENDING).value,
+                body.scheduled_at is not None,
+            )
+    except asyncpg.UniqueViolationError:
+        # A concurrent request with the same key won the insert.
+        existing = await _replay_of(pool, body, user["username"])
+        if existing is None:
+            raise
+        response.status_code = status.HTTP_200_OK
+        return existing
 
     commands_total.inc()
     await log_action(
@@ -88,6 +106,30 @@ async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser):
             "mode_check": mode_note,
         },
     )
+    return _row_to_command(row)
+
+
+async def _replay_of(pool: Pool, body: CommandCreate, username: str) -> CommandOut | None:
+    """The command previously created with this idempotency key, if the
+    request is a genuine repeat. A key reused for a different command (or
+    by another user) is a client error, not a replay."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM commands WHERE idempotency_key = $1", body.idempotency_key,
+        )
+    if row is None:
+        return None
+    same = (
+        row["created_by"] == username
+        and row["satellite_id"] == body.satellite_id
+        and row["command_type"] == body.command_type
+        and (row["params"] or {}) == (body.params or {})
+    )
+    if not same:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="idempotency_key was already used for a different command",
+        )
     return _row_to_command(row)
 
 
@@ -229,23 +271,33 @@ async def transition_command(
                     detail="Command was not marked as safe_retry",
                 )
 
-        # Build the UPDATE
+        # Build the UPDATE. It only applies if the command is still in the
+        # state we validated: the scheduler runs concurrently, and a plain
+        # "WHERE id = $1" could overwrite a transition it made meanwhile.
         updates = ["status = $2", "updated_at = NOW()"]
-        args: list = [command_id, target.value]
+        args: list = [command_id, target.value, current.value]
 
         if target == CommandStatus.SENT:
             updates.append("sent_at = NOW()")
         elif target == CommandStatus.ACKED:
             updates.append("acked_at = NOW()")
         elif target == CommandStatus.RETRY:
-            updates.append(f"retry_count = retry_count + 1")
+            updates.append("retry_count = retry_count + 1")
 
         if body.error_message:
             args.append(body.error_message)
             updates.append(f"error_message = ${len(args)}")
 
-        query = f"UPDATE commands SET {', '.join(updates)} WHERE id = $1 RETURNING *"
+        query = (
+            f"UPDATE commands SET {', '.join(updates)} "
+            "WHERE id = $1 AND status = $3 RETURNING *"
+        )
         updated = await conn.fetchrow(query, *args)
+        if updated is None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail="Command changed state concurrently; reload and retry",
+            )
 
     await log_action(
         pool, user["username"], "command.transition",
