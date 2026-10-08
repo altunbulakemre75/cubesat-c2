@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Request, status
 
 from src.api.audit import log_action
+from src.api.bootstrap import remove_bootstrap_file
 from src.api.auth import (
     WS_TICKET_TTL_S,
     AuthError,
@@ -193,6 +194,8 @@ async def change_password(
         )
 
     await log_action(pool, user["username"], "auth.password_change")
+    if user["username"] == "admin":
+        remove_bootstrap_file()
     return TokenResponse(
         access_token=create_access_token(user["username"], version),
         refresh_token=create_refresh_token(user["username"], version),

@@ -25,6 +25,28 @@ logger = logging.getLogger(__name__)
 BOOTSTRAP_FILE = Path(os.environ.get("ADMIN_BOOTSTRAP_FILE", "/tmp/cubesat_admin_bootstrap"))
 
 
+def _write_bootstrap_file(password: str) -> None:
+    BOOTSTRAP_FILE.parent.mkdir(parents=True, exist_ok=True)
+    BOOTSTRAP_FILE.write_text(
+        f"username: admin\npassword: {password}\n"
+        "MUST be changed on first login (must_change_password = TRUE).\n"
+        "This file is deleted automatically after that password change.\n",
+        encoding="utf-8",
+    )
+    try:
+        BOOTSTRAP_FILE.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 600
+    except (NotImplementedError, OSError):
+        pass  # Windows / unusual filesystems
+
+
+def remove_bootstrap_file() -> None:
+    """Called once the bootstrapped admin has chosen their own password."""
+    try:
+        BOOTSTRAP_FILE.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Could not remove bootstrap file %s: %s", BOOTSTRAP_FILE, exc)
+
+
 async def ensure_admin_user(pool: asyncpg.Pool) -> None:
     async with pool.acquire() as conn:
         admin_count = await conn.fetchval(
@@ -36,9 +58,18 @@ async def ensure_admin_user(pool: asyncpg.Pool) -> None:
 
         password = secrets.token_urlsafe(16)   # ≥ 21 chars
 
-        # Create user FIRST. If insert fails we never expose a password we
-        # can't actually use to log in.
-        await conn.execute(
+        # Write the file FIRST. If that fails we stop before creating a user
+        # whose password nobody could ever read — the next start retries.
+        # The password is never logged: logs are shipped to Loki and indexed.
+        try:
+            _write_bootstrap_file(password)
+        except OSError as exc:
+            raise RuntimeError(
+                f"Cannot write the admin bootstrap file {BOOTSTRAP_FILE} ({exc}). "
+                "Set ADMIN_BOOTSTRAP_FILE to a writable path and restart."
+            ) from None
+
+        created = await conn.execute(
             """
             INSERT INTO users (username, email, password_hash, role, active, must_change_password)
             VALUES ('admin', 'admin@localhost', $1, 'admin', TRUE, TRUE)
@@ -47,34 +78,24 @@ async def ensure_admin_user(pool: asyncpg.Pool) -> None:
             hash_password(password),
         )
 
-        # Drop the password to a chmod-600 file. Logs only mention the path.
-        try:
-            BOOTSTRAP_FILE.parent.mkdir(parents=True, exist_ok=True)
-            BOOTSTRAP_FILE.write_text(
-                f"username: admin\npassword: {password}\n"
-                "MUST be changed on first login (must_change_password = TRUE).\n"
-                "Delete this file after the first password rotation.\n",
-                encoding="utf-8",
-            )
-            try:
-                BOOTSTRAP_FILE.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 600
-            except (NotImplementedError, OSError):
-                pass  # Windows / unusual filesystems
-            password_location = f"file: {BOOTSTRAP_FILE}"
-        except OSError as exc:
-            # If we can't write the file, fall back to the legacy log banner.
-            # Better cleartext-in-logs than no password at all.
-            logger.error("Could not write bootstrap file (%s); falling back to log banner", exc)
-            password_location = f"PASSWORD (rotate immediately): {password}"
+    if created != "INSERT 0 1":
+        # A user named "admin" exists but isn't an active admin, so the
+        # password in the file would never work. Don't leave it around.
+        remove_bootstrap_file()
+        logger.error(
+            "No active admin exists and the username 'admin' is taken by a "
+            "non-admin account. Promote an existing user to admin in the database."
+        )
+        return
 
-        banner = "=" * 70
-        logger.warning(banner)
-        logger.warning(" INITIAL ADMIN USER CREATED")
-        logger.warning("   Username: admin")
-        logger.warning("   Password location: %s", password_location)
-        logger.warning("   The user is flagged must_change_password=TRUE.")
-        logger.warning("   Read the file, log in, change the password, then 'rm' the file.")
-        logger.warning(banner)
+    banner = "=" * 70
+    logger.warning(banner)
+    logger.warning(" INITIAL ADMIN USER CREATED")
+    logger.warning("   Username: admin")
+    logger.warning("   Password location: file: %s", BOOTSTRAP_FILE)
+    logger.warning("   The user is flagged must_change_password=TRUE.")
+    logger.warning("   Read the file and log in; it is deleted after the password change.")
+    logger.warning(banner)
 
 
 async def ensure_seed_satellites(pool: asyncpg.Pool, satellite_ids: list[str]) -> None:
