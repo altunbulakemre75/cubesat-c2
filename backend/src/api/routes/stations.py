@@ -15,6 +15,9 @@ class StationCreate(BaseModel):
     longitude_deg: float = Field(..., ge=-180, le=180)
     elevation_m: float = Field(default=0, ge=0)
     min_elevation_deg: float = Field(default=10.0, ge=0, le=90)
+    # Stations an operator adds are usually their own transceivers; set
+    # False for receive-only sites. Only uplink-capable passes get commands.
+    uplink_capable: bool = True
 
 
 class StationOut(BaseModel):
@@ -26,6 +29,7 @@ class StationOut(BaseModel):
     elevation_m: float
     min_elevation_deg: float
     active: bool
+    uplink_capable: bool
 
 
 @router.get("", response_model=list[StationOut])
@@ -44,12 +48,14 @@ async def create_station(body: StationCreate, pool: Pool, user: CurrentUser):
         row = await conn.fetchrow(
             """
             INSERT INTO ground_stations
-              (name, satnogs_id, latitude_deg, longitude_deg, elevation_m, min_elevation_deg)
-            VALUES ($1,$2,$3,$4,$5,$6)
+              (name, satnogs_id, latitude_deg, longitude_deg, elevation_m,
+               min_elevation_deg, uplink_capable)
+            VALUES ($1,$2,$3,$4,$5,$6,$7)
             RETURNING *
             """,
             body.name, body.satnogs_id, body.latitude_deg,
             body.longitude_deg, body.elevation_m, body.min_elevation_deg,
+            body.uplink_capable,
         )
     await log_action(pool, user["username"], "station.create",
                      target_id=str(row["id"]), target_type="ground_station",

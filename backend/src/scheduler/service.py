@@ -44,6 +44,8 @@ _SCHEDULE_INTERVAL_S = 5.0    # how often to poll PENDING commands
 _EXECUTE_INTERVAL_S = 1.0     # how often to poll SCHEDULED commands ready to fire
 _TIMEOUT_INTERVAL_S = 10.0    # how often to scan SENT commands for ACK timeout
 ACK_TIMEOUT_S = 60.0          # how long to wait for an ACK after publishing
+# A pass that ends sooner than this is not worth starting an uplink in.
+_MIN_WINDOW_LEFT_S = 30.0
 
 
 def _cmd_subject(satellite_id: str) -> str:
@@ -142,15 +144,23 @@ class CommandScheduler:
                     )
 
     async def _next_pass_aos(self, conn: asyncpg.Connection, satellite_id: str) -> datetime | None:
-        return await conn.fetchval(
+        """Start of the next usable uplink window: the current pass if one is
+        in progress (with time left), otherwise the next AOS. Only stations
+        that can transmit count — SatNOGS stations are receive-only."""
+        start: datetime | None = await conn.fetchval(
             """
-            SELECT aos FROM pass_schedule
-             WHERE satellite_id = $1 AND aos > NOW()
-             ORDER BY aos ASC
+            SELECT GREATEST(p.aos, NOW())
+              FROM pass_schedule p
+              JOIN ground_stations g ON g.id = p.station_id
+             WHERE p.satellite_id = $1
+               AND g.uplink_capable AND g.active
+               AND p.los > NOW() + make_interval(secs => $2)
+             ORDER BY p.aos ASC
              LIMIT 1
             """,
-            satellite_id,
+            satellite_id, _MIN_WINDOW_LEFT_S,
         )
+        return start
 
     # ─────────────────────────────────────────────────────────────────────
     # SCHEDULED → TRANSMITTING → SENT

@@ -63,8 +63,8 @@ def _run_scheduler_cycle(dsn: str) -> None:
 
 def _add_future_pass(db: Db) -> None:
     db.execute(
-        "INSERT INTO ground_stations (id, name, latitude_deg, longitude_deg) "
-        "VALUES (1, 'GS', 39.9, 32.8)"
+        "INSERT INTO ground_stations (id, name, latitude_deg, longitude_deg, uplink_capable) "
+        "VALUES (1, 'GS', 39.9, 32.8, TRUE)"
     )
     db.execute(
         "INSERT INTO pass_schedule (satellite_id, station_id, aos, los, max_elevation_deg) "

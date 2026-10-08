@@ -67,8 +67,11 @@ def test_decode_rejects_tampered_signature():
     """Last char of the signature flipped. Must raise JWTError."""
     t = create_access_token("alice")
     head, payload, sig = t.split(".")
-    # Pick a different char that's still in the JWT base64url alphabet.
-    tampered_sig = sig[:-1] + ("A" if sig[-1] != "A" else "B")
+    # Flip a char in the middle: the LAST base64url char of a 32-byte HMAC
+    # carries two unused padding bits, so changing it sometimes leaves the
+    # decoded signature identical (this test used to fail ~1 run in 16).
+    mid = len(sig) // 2
+    tampered_sig = sig[:mid] + ("A" if sig[mid] != "A" else "B") + sig[mid + 1:]
     tampered = ".".join([head, payload, tampered_sig])
     with pytest.raises(JWTError):
         decode_token(tampered)
