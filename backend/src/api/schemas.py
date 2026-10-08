@@ -93,6 +93,8 @@ class CommandOut(BaseModel):
     scheduled_at: datetime | None
     sent_at: datetime | None
     acked_at: datetime | None
+    approved_by: str | None = None
+    approved_at: datetime | None = None
 
 
 # ── Passes ────────────────────────────────────────────────────────────────────

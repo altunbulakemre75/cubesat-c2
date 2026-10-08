@@ -48,6 +48,7 @@ export interface Command {
   satellite_id: string
   command_type: string
   status:
+    | 'awaiting_approval'
     | 'pending'
     | 'scheduled'
     | 'transmitting'
@@ -58,6 +59,9 @@ export interface Command {
     | 'dead'
   created_at: string
   params?: Record<string, unknown>
+  created_by?: string | null
+  approved_by?: string | null
+  error_message?: string | null
 }
 
 export interface Anomaly {

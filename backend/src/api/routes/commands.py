@@ -8,7 +8,7 @@ from src.api.deps import CurrentUser, Pool
 from src.api.metrics import commands_denied_by_policy_total, commands_total
 from src.api.rbac import Role, require_role
 from src.api.schemas import CommandCreate, CommandOut
-from src.commands.models import CommandStatus, MAX_RETRIES, UNSAFE_RETRY_TYPES
+from src.commands.models import CommandStatus, MAX_RETRIES, TRANSITIONS, UNSAFE_RETRY_TYPES
 from src.commands.policy import ADMIN_ONLY_COMMANDS, TWO_ADMIN_COMMANDS, evaluate
 from src.ingestion.models import SatelliteMode
 from src.storage.redis_client import get_satellite_mode
@@ -38,62 +38,11 @@ async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser):
     if body.command_type in ADMIN_ONLY_COMMANDS:
         require_role(Role.ADMIN, user["role"])
 
-    # Two-admin approval: for now, require admin role and log the requirement.
-    # Full two-admin workflow (pending approval queue) is tracked for follow-up.
-    if body.command_type in TWO_ADMIN_COMMANDS:
+    # Critical commands are held until a different admin approves them
+    # (POST /commands/{id}/approve). The scheduler only reads 'pending'.
+    needs_approval = body.command_type in TWO_ADMIN_COMMANDS
+    if needs_approval:
         require_role(Role.ADMIN, user["role"])
-        # Check if another admin has already approved a command with the same
-        # idempotency key (simple approval gate)
-        if body.idempotency_key:
-            async with pool.acquire() as conn:
-                existing = await conn.fetchrow(
-                    """
-                    SELECT created_by FROM commands
-                    WHERE idempotency_key = $1 AND status = 'pending'
-                    """,
-                    body.idempotency_key,
-                )
-                if existing and existing["created_by"] == user["username"]:
-                    raise HTTPException(
-                        status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail=(
-                            f"Command type '{body.command_type}' requires approval from "
-                            f"a DIFFERENT admin. You already submitted this command."
-                        ),
-                    )
-                if existing and existing["created_by"] != user["username"]:
-                    # Second admin confirming — transition the existing command to scheduled
-                    await conn.execute(
-                        """
-                        UPDATE commands SET status = 'scheduled', updated_at = NOW()
-                        WHERE idempotency_key = $1 AND status = 'pending'
-                        """,
-                        body.idempotency_key,
-                    )
-                    await log_action(
-                        pool, user["username"], "command.two_admin_approve",
-                        target_id=str(existing.get("id", "")),
-                        target_type="command",
-                        details={
-                            "original_admin": existing["created_by"],
-                            "approving_admin": user["username"],
-                            "command_type": body.command_type,
-                        },
-                    )
-                    # Return the updated command
-                    row = await conn.fetchrow(
-                        "SELECT * FROM commands WHERE idempotency_key = $1",
-                        body.idempotency_key,
-                    )
-                    return _row_to_command(row)
-        else:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=(
-                    f"Command type '{body.command_type}' requires two-admin approval. "
-                    f"You must provide an idempotency_key so the second admin can confirm."
-                ),
-            )
 
     # Policy check: is this command allowed for the satellite's current mode?
     mode_str = await get_satellite_mode(body.satellite_id)
@@ -114,14 +63,15 @@ async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser):
             """
             INSERT INTO commands (
                 id, satellite_id, command_type, params, priority,
-                safe_retry, idempotency_key, created_by, scheduled_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                safe_retry, idempotency_key, created_by, scheduled_at, status
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
             RETURNING *
             """,
             cmd_id, body.satellite_id, body.command_type,
             body.params if body.params else {},
             body.priority, body.safe_retry, body.idempotency_key,
             user["username"], body.scheduled_at,
+            (CommandStatus.AWAITING_APPROVAL if needs_approval else CommandStatus.PENDING).value,
         )
 
     commands_total.inc()
@@ -131,6 +81,60 @@ async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser):
         details={"satellite_id": body.satellite_id, "command_type": body.command_type},
     )
     return _row_to_command(row)
+
+
+@router.post("/{command_id}/approve", response_model=CommandOut)
+async def approve_command(command_id: str, pool: Pool, user: CurrentUser):
+    """Second-admin approval for a critical command. The approver must be a
+    different admin than the creator; the mode policy is re-checked because
+    the satellite may have changed mode since the request was made."""
+    require_role(Role.ADMIN, user["role"])
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM commands WHERE id = $1", command_id)
+    if not row:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Command not found")
+    if row["status"] != CommandStatus.AWAITING_APPROVAL.value:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="Command is not awaiting approval")
+    if row["created_by"] == user["username"]:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="A different admin must approve this command",
+        )
+
+    mode_str = await get_satellite_mode(row["satellite_id"])
+    if mode_str:
+        decision = evaluate(row["command_type"], SatelliteMode(mode_str))
+        if not decision:
+            commands_denied_by_policy_total.labels(satellite_mode=mode_str).inc()
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=decision.reason)
+
+    async with pool.acquire() as conn:
+        updated = await conn.fetchrow(
+            """
+            UPDATE commands
+               SET status = 'pending', approved_by = $2, approved_at = NOW(),
+                   updated_at = NOW()
+             WHERE id = $1 AND status = 'awaiting_approval' AND created_by <> $2
+            RETURNING *
+            """,
+            command_id, user["username"],
+        )
+    if updated is None:
+        # Lost a race with another approver or a cancel.
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="Command is not awaiting approval")
+
+    await log_action(
+        pool, user["username"], "command.two_admin_approve",
+        target_id=command_id, target_type="command",
+        details={
+            "original_admin": row["created_by"],
+            "approving_admin": user["username"],
+            "command_type": row["command_type"],
+            "satellite_id": row["satellite_id"],
+        },
+    )
+    return _row_to_command(updated)
 
 
 @router.patch("/{command_id}/transition", response_model=CommandOut)
@@ -165,7 +169,7 @@ async def transition_command(
         current = CommandStatus(row["status"])
 
         # Validate state machine transition
-        valid_next = _TRANSITIONS_MAP.get(current, set())
+        valid_next = TRANSITIONS.get(current, set())
         if target not in valid_next:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -257,7 +261,7 @@ async def cancel_command(command_id: str, pool: Pool, user: CurrentUser):
         result = await conn.execute(
             """
             UPDATE commands SET status = 'dead', updated_at = NOW()
-            WHERE id = $1 AND status IN ('pending', 'scheduled')
+            WHERE id = $1 AND status IN ('awaiting_approval', 'pending', 'scheduled')
             """,
             command_id,
         )
@@ -271,19 +275,6 @@ async def cancel_command(command_id: str, pool: Pool, user: CurrentUser):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
-# Mirror of the transition table from src/commands/models.py for DB-level validation
-_TRANSITIONS_MAP: dict[CommandStatus, set[CommandStatus]] = {
-    CommandStatus.PENDING: {CommandStatus.SCHEDULED, CommandStatus.DEAD},
-    CommandStatus.SCHEDULED: {CommandStatus.TRANSMITTING, CommandStatus.PENDING, CommandStatus.DEAD},
-    CommandStatus.TRANSMITTING: {CommandStatus.SENT, CommandStatus.TIMEOUT},
-    CommandStatus.SENT: {CommandStatus.ACKED, CommandStatus.TIMEOUT},
-    CommandStatus.ACKED: set(),
-    CommandStatus.TIMEOUT: {CommandStatus.RETRY, CommandStatus.DEAD},
-    CommandStatus.RETRY: {CommandStatus.TRANSMITTING, CommandStatus.DEAD},
-    CommandStatus.DEAD: set(),
-}
-
 
 def _row_to_command(row) -> CommandOut:
     return CommandOut(
@@ -302,4 +293,6 @@ def _row_to_command(row) -> CommandOut:
         scheduled_at=row["scheduled_at"],
         sent_at=row["sent_at"],
         acked_at=row["acked_at"],
+        approved_by=row["approved_by"],
+        approved_at=row["approved_at"],
     )

@@ -1,9 +1,12 @@
 """
 Command state machine models.
 
-States: PENDING → SCHEDULED → TRANSMITTING → SENT → ACKED
+States: [AWAITING_APPROVAL →] PENDING → SCHEDULED → TRANSMITTING → SENT → ACKED
                                                    ↘ TIMEOUT → RETRY → ACKED
                                                               ↘ DEAD → (FDIR)
+
+AWAITING_APPROVAL is the entry state for two-admin commands; only the
+approval endpoint (a different admin) moves them to PENDING.
 """
 
 import uuid
@@ -15,6 +18,7 @@ from pydantic import BaseModel, Field
 
 
 class CommandStatus(str, Enum):
+    AWAITING_APPROVAL = "awaiting_approval"
     PENDING = "pending"
     SCHEDULED = "scheduled"
     TRANSMITTING = "transmitting"
@@ -27,6 +31,7 @@ class CommandStatus(str, Enum):
 
 # Allowed next states per current state
 _TRANSITIONS: dict[CommandStatus, set[CommandStatus]] = {
+    CommandStatus.AWAITING_APPROVAL: {CommandStatus.PENDING, CommandStatus.DEAD},
     CommandStatus.PENDING: {CommandStatus.SCHEDULED, CommandStatus.DEAD},
     CommandStatus.SCHEDULED: {CommandStatus.TRANSMITTING, CommandStatus.PENDING, CommandStatus.DEAD},
     CommandStatus.TRANSMITTING: {CommandStatus.SENT, CommandStatus.TIMEOUT},
@@ -36,6 +41,10 @@ _TRANSITIONS: dict[CommandStatus, set[CommandStatus]] = {
     CommandStatus.RETRY: {CommandStatus.TRANSMITTING, CommandStatus.DEAD},
     CommandStatus.DEAD: set(),                           # terminal
 }
+
+# Public alias — the REST layer validates DB-level transitions against the
+# same table instead of keeping its own copy in sync by hand.
+TRANSITIONS = _TRANSITIONS
 
 MAX_RETRIES = 3
 

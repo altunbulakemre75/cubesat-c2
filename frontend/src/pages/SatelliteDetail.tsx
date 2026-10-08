@@ -23,6 +23,7 @@ const TABS: { key: TabKey; label: string }[] = [
 ]
 
 const COMMAND_STATUS_STYLES: Record<Command['status'], string> = {
+  awaiting_approval: 'bg-amber-900 text-amber-200',
   pending: 'bg-gray-700 text-gray-300',
   scheduled: 'bg-blue-800 text-blue-200',
   transmitting: 'bg-yellow-800 text-yellow-200',

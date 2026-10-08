@@ -1,14 +1,15 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { clsx } from 'clsx'
 import { fetchSatellites } from '../api/satellites'
-import { fetchCommands } from '../api/commands'
+import { approveCommand, cancelCommand, fetchCommands } from '../api/commands'
 import { CommandModal } from '../components/CommandModal'
 import { ModeBadge } from '../components/ModeBadge'
 import { useAppStore } from '../store'
 import type { Command } from '../types'
 
 const COMMAND_STATUS_STYLES: Record<Command['status'], string> = {
+  awaiting_approval: 'bg-amber-900 text-amber-200 border-amber-600',
   pending: 'bg-gray-700 text-gray-300 border-gray-600',
   scheduled: 'bg-blue-800 text-blue-200 border-blue-700',
   transmitting: 'bg-yellow-800 text-yellow-200 border-yellow-700',
@@ -20,6 +21,7 @@ const COMMAND_STATUS_STYLES: Record<Command['status'], string> = {
 }
 
 const STATUS_ORDER: Command['status'][] = [
+  'awaiting_approval',
   'pending',
   'scheduled',
   'transmitting',
@@ -40,6 +42,19 @@ interface CommandRowProps {
 
 function CommandRow({ command }: CommandRowProps) {
   const [expanded, setExpanded] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const username = useAppStore((s) => s.username)
+  const qc = useQueryClient()
+  const onDone = {
+    onSuccess: () => { setActionError(''); void qc.invalidateQueries({ queryKey: ['commands'] }) },
+    onError: (e: unknown) => {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setActionError(detail ?? 'Action failed')
+    },
+  }
+  const approveMut = useMutation({ mutationFn: () => approveCommand(command.id), ...onDone })
+  const cancelMut = useMutation({ mutationFn: () => cancelCommand(command.id), ...onDone })
+  const awaiting = command.status === 'awaiting_approval'
 
   return (
     <div className="rounded-lg border border-space-border bg-space-dark">
@@ -78,6 +93,33 @@ function CommandRow({ command }: CommandRowProps) {
               <span className="text-gray-300">{command.satellite_id}</span>
             </div>
           </div>
+          {awaiting && (
+            <div className="mt-2 flex items-center gap-2">
+              <span className="font-mono text-xs text-amber-300">
+                Requested by {command.created_by ?? 'unknown'} — needs a second admin.
+              </span>
+              {username !== command.created_by && (
+                <button
+                  onClick={() => approveMut.mutate()}
+                  disabled={approveMut.isPending}
+                  className="rounded border border-amber-500 px-2 py-0.5 font-mono text-xs text-amber-200 hover:bg-amber-500/20"
+                >
+                  Approve
+                </button>
+              )}
+              <button
+                onClick={() => cancelMut.mutate()}
+                disabled={cancelMut.isPending}
+                className="rounded border border-gray-600 px-2 py-0.5 font-mono text-xs text-gray-300 hover:bg-gray-700"
+              >
+                Reject
+              </button>
+            </div>
+          )}
+          {command.approved_by && (
+            <p className="mt-1 font-mono text-xs text-gray-500">Approved by {command.approved_by}</p>
+          )}
+          {actionError && <p className="mt-1 font-mono text-xs text-red-400">{actionError}</p>}
           {command.params && Object.keys(command.params).length > 0 && (
             <div className="mt-2">
               <p className="font-mono text-xs text-gray-500">Params:</p>
