@@ -5,6 +5,9 @@ export interface SendCommandPayload {
   satellite_id: string
   command_type: string
   params?: Record<string, unknown>
+  // Set after the server answered 409: the satellite's mode is unknown or
+  // stale, and the operator chose to queue the command anyway.
+  confirm_unverified_mode?: boolean
 }
 
 export async function fetchCommands(satelliteId?: string): Promise<Command[]> {

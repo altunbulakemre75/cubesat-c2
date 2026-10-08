@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -42,11 +43,25 @@ async def get_last_telemetry(satellite_id: str) -> dict[str, Any] | None:
     return json.loads(raw) if raw else None
 
 
-async def set_satellite_mode(satellite_id: str, mode: str) -> None:
+async def set_satellite_mode(satellite_id: str, mode: str, observed_at: datetime) -> None:
+    """Cache the latest mode with the time it was observed. No TTL: whether
+    the value is still trustworthy is decided from observed_at by the
+    caller (v0.1.0 let the key expire after 2 h and the policy check then
+    silently stopped applying)."""
     r = get_client()
-    await r.set(f"satellite:mode:{satellite_id}", mode, ex=7200)
+    value = json.dumps({"mode": mode, "at": observed_at.isoformat()})
+    await r.set(f"satellite:mode:{satellite_id}", value)
 
 
-async def get_satellite_mode(satellite_id: str) -> str | None:
+async def get_satellite_mode(satellite_id: str) -> tuple[str, str] | None:
+    """(mode, observed_at ISO string), or None if absent or in the legacy
+    plain-string format written by v0.1.0."""
     r = get_client()
-    return await r.get(f"satellite:mode:{satellite_id}")
+    raw = await r.get(f"satellite:mode:{satellite_id}")
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+        return str(data["mode"]), str(data["at"])
+    except (ValueError, KeyError, TypeError):
+        return None

@@ -143,6 +143,24 @@ def db(test_dsn: str) -> Iterator[Db]:
     yield Db(test_dsn)
 
 
+class _UnavailableRedis:
+    """Every call fails at once, like a Redis that is down. Redis is only a
+    cache in this system, so the app must behave correctly without it —
+    and tests stay fast and deterministic instead of waiting on connect
+    timeouts to a Redis that isn't running."""
+
+    def __getattr__(self, name: str) -> Any:
+        async def _fail(*_args: Any, **_kwargs: Any) -> Any:
+            raise ConnectionError("redis unavailable (integration tests)")
+        return _fail
+
+
+@pytest.fixture(autouse=True)
+def _redis_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.storage import redis_client
+    monkeypatch.setattr(redis_client, "get_client", lambda: _UnavailableRedis())
+
+
 @asynccontextmanager
 async def _noop_lifespan(_app: FastAPI) -> AsyncIterator[None]:
     yield

@@ -49,14 +49,28 @@ export function CommandModal({ satelliteId, satelliteMode, onClose }: CommandMod
   const [commandType, setCommandType] = useState<CommandType>('ping')
   const [paramsRaw, setParamsRaw] = useState('')
   const [paramsError, setParamsError] = useState<string | null>(null)
+  // Server-side refusal reasons: 409 = mode can't be verified (operator may
+  // confirm), anything else = final answer (e.g. 422 policy denial).
+  const [confirmPrompt, setConfirmPrompt] = useState<string | null>(null)
+  const [serverError, setServerError] = useState<string | null>(null)
 
   const queryClient = useQueryClient()
 
   const mutation = useMutation({
     mutationFn: sendCommand,
+    onMutate: () => {
+      setConfirmPrompt(null)
+      setServerError(null)
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['commands', satelliteId] })
       onClose()
+    },
+    onError: (e: unknown) => {
+      const response = (e as { response?: { status?: number; data?: { detail?: unknown } } }).response
+      const detail = typeof response?.data?.detail === 'string' ? response.data.detail : null
+      if (response?.status === 409 && detail) setConfirmPrompt(detail)
+      else setServerError(detail ?? 'Failed to send command. Check backend connectivity.')
     },
   })
 
@@ -72,7 +86,7 @@ export function CommandModal({ satelliteId, satelliteMode, onClose }: CommandMod
     setParamsError(parsed === null ? 'Invalid JSON object' : null)
   }, [])
 
-  const handleSubmit = () => {
+  const handleSubmit = (confirmUnverifiedMode = false) => {
     if (disabled || mutation.isPending) return
 
     const params = parseParamsJson(paramsRaw)
@@ -85,6 +99,7 @@ export function CommandModal({ satelliteId, satelliteMode, onClose }: CommandMod
       satellite_id: satelliteId,
       command_type: commandType,
       params: Object.keys(params).length > 0 ? params : undefined,
+      ...(confirmUnverifiedMode ? { confirm_unverified_mode: true } : {}),
     })
   }
 
@@ -172,12 +187,24 @@ export function CommandModal({ satelliteId, satelliteMode, onClose }: CommandMod
             )}
           </div>
 
-          {/* Error from mutation */}
-          {mutation.isError && (
+          {/* Mode can't be verified — operator may queue anyway */}
+          {confirmPrompt && (
+            <div className="rounded border border-amber-600 bg-amber-900/20 p-2">
+              <p className="font-mono text-xs text-amber-300">{confirmPrompt}</p>
+              <button
+                onClick={() => handleSubmit(true)}
+                disabled={mutation.isPending}
+                className="mt-2 rounded border border-amber-500 px-2 py-1 font-mono text-xs text-amber-200 hover:bg-amber-500/20"
+              >
+                Queue anyway
+              </button>
+            </div>
+          )}
+
+          {/* Final refusal or transport error */}
+          {serverError && (
             <div className="rounded border border-red-700 bg-red-900/20 p-2">
-              <p className="font-mono text-xs text-red-400">
-                Failed to send command. Check backend connectivity.
-              </p>
+              <p className="font-mono text-xs text-red-400">{serverError}</p>
             </div>
           )}
         </div>
@@ -191,7 +218,7 @@ export function CommandModal({ satelliteId, satelliteMode, onClose }: CommandMod
             Cancel
           </button>
           <button
-            onClick={handleSubmit}
+            onClick={() => handleSubmit()}
             disabled={disabled || mutation.isPending || paramsError !== null}
             className={clsx(
               'rounded px-4 py-2 font-mono text-sm font-semibold transition-colors',

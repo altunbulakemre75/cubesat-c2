@@ -10,9 +10,6 @@ was never actually waited for.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
-from unittest.mock import AsyncMock, patch
-
 import asyncpg
 import pytest
 from fastapi.testclient import TestClient
@@ -24,17 +21,14 @@ from tests.integration.conftest import Db, bearer, login
 PW = "password-two-admin"
 
 
-@pytest.fixture(autouse=True)
-def _no_mode_cache() -> Iterator[None]:
-    # Satellite mode comes from the Redis cache; "unknown" keeps the policy
-    # engine out of the way for these tests.
-    with patch("src.api.routes.commands.get_satellite_mode", new=AsyncMock(return_value=None)):
-        yield
-
-
 @pytest.fixture
 def admins(client: TestClient, db: Db) -> dict[str, str]:
     db.execute("INSERT INTO satellites (id, name) VALUES ('SAT1', 'SAT1')")
+    # Fresh NOMINAL telemetry: the mode policy allows everything.
+    db.execute(
+        "INSERT INTO telemetry (time, satellite_id, source, sequence, mode) "
+        "VALUES (NOW(), 'SAT1', 'ax25', 1, 'nominal')"
+    )
     db.create_user("alice", PW, "admin")
     db.create_user("bob", PW, "admin")
     db.create_user("olga", PW, "operator")

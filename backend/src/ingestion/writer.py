@@ -261,7 +261,9 @@ class TelemetryWriter:
         # Wrap Redis calls so a Redis outage doesn't break the writer.
         try:
             await redis_client.set_last_telemetry(t.satellite_id, snapshot)
-            await redis_client.set_satellite_mode(t.satellite_id, t.params.mode.value)
+            await redis_client.set_satellite_mode(
+                t.satellite_id, t.params.mode.value, t.timestamp,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.debug("Redis cache write failed (non-fatal): %s", exc)
 

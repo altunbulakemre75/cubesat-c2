@@ -10,8 +10,7 @@ from src.api.rbac import Role, require_role
 from src.api.schemas import CommandCreate, CommandOut
 from src.commands.models import CommandStatus, MAX_RETRIES, TRANSITIONS, UNSAFE_RETRY_TYPES
 from src.commands.policy import ADMIN_ONLY_COMMANDS, TWO_ADMIN_COMMANDS, evaluate
-from src.ingestion.models import SatelliteMode
-from src.storage.redis_client import get_satellite_mode
+from src.commands.mode import current_mode
 
 router = APIRouter(prefix="/commands", tags=["commands"])
 
@@ -44,15 +43,6 @@ async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser):
     if needs_approval:
         require_role(Role.ADMIN, user["role"])
 
-    # Policy check: is this command allowed for the satellite's current mode?
-    mode_str = await get_satellite_mode(body.satellite_id)
-    if mode_str:
-        decision = evaluate(body.command_type, SatelliteMode(mode_str))
-        if not decision:
-            commands_denied_by_policy_total.labels(satellite_mode=mode_str).inc()
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=decision.reason)
-
-    cmd_id = str(uuid.uuid4())
     async with pool.acquire() as conn:
         if not await conn.fetchval(
             "SELECT EXISTS (SELECT 1 FROM satellites WHERE id = $1)", body.satellite_id,
@@ -61,12 +51,23 @@ async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser):
                 status.HTTP_404_NOT_FOUND,
                 detail=f"Satellite '{body.satellite_id}' is not registered",
             )
+
+    # Policy check against the satellite's mode. A fresh reading is
+    # enforced; an unknown/stale one needs explicit operator confirmation.
+    mode_note = await _check_mode_policy(
+        pool, body.satellite_id, body.command_type,
+        confirmed=body.confirm_unverified_mode,
+    )
+
+    cmd_id = str(uuid.uuid4())
+    async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO commands (
                 id, satellite_id, command_type, params, priority,
-                safe_retry, idempotency_key, created_by, scheduled_at, status
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                safe_retry, idempotency_key, created_by, scheduled_at, status,
+                scheduled_manually
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
             RETURNING *
             """,
             cmd_id, body.satellite_id, body.command_type,
@@ -74,15 +75,49 @@ async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser):
             body.priority, body.safe_retry, body.idempotency_key,
             user["username"], body.scheduled_at,
             (CommandStatus.AWAITING_APPROVAL if needs_approval else CommandStatus.PENDING).value,
+            body.scheduled_at is not None,
         )
 
     commands_total.inc()
     await log_action(
         pool, user["username"], "command.create",
         target_id=cmd_id, target_type="command",
-        details={"satellite_id": body.satellite_id, "command_type": body.command_type},
+        details={
+            "satellite_id": body.satellite_id,
+            "command_type": body.command_type,
+            "mode_check": mode_note,
+        },
     )
     return _row_to_command(row)
+
+
+async def _check_mode_policy(
+    pool: Pool, satellite_id: str, command_type: str, *, confirmed: bool,
+) -> str:
+    """Raise if the command may not be queued; return a note for the audit
+    log describing what the decision was based on."""
+    reading = await current_mode(pool, satellite_id)
+    if reading is None or reading.stale:
+        if not confirmed:
+            seen = (
+                f"last reported {reading.mode.value} at {reading.observed_at.isoformat()}"
+                if reading else "no mode reported yet"
+            )
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Satellite mode can't be verified ({seen}). Re-send with "
+                    "confirm_unverified_mode=true to queue the command anyway; "
+                    "it is re-checked before transmission."
+                ),
+            )
+        return "unverified (operator confirmed)"
+
+    decision = evaluate(command_type, reading.mode)
+    if not decision:
+        commands_denied_by_policy_total.labels(satellite_mode=reading.mode.value).inc()
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=decision.reason)
+    return f"{reading.mode.value} at {reading.observed_at.isoformat()}"
 
 
 @router.post("/{command_id}/approve", response_model=CommandOut)
@@ -104,12 +139,9 @@ async def approve_command(command_id: str, pool: Pool, user: CurrentUser):
             detail="A different admin must approve this command",
         )
 
-    mode_str = await get_satellite_mode(row["satellite_id"])
-    if mode_str:
-        decision = evaluate(row["command_type"], SatelliteMode(mode_str))
-        if not decision:
-            commands_denied_by_policy_total.labels(satellite_mode=mode_str).inc()
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=decision.reason)
+    # The approver doesn't get to bypass a mode that has since become
+    # restrictive; an unverified mode was already confirmed by the creator.
+    await _check_mode_policy(pool, row["satellite_id"], row["command_type"], confirmed=True)
 
     async with pool.acquire() as conn:
         updated = await conn.fetchrow(

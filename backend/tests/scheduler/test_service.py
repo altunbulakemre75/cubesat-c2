@@ -15,11 +15,20 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.scheduler.service import CommandScheduler
+
+
+@pytest.fixture(autouse=True)
+def _mode_unknown():
+    # The transmission-time mode check reads telemetry; these unit tests
+    # script the pool call-by-call, so pin the mode to "unknown" (= send).
+    # The check itself is covered in tests/integration/test_mode_policy.py.
+    with patch("src.scheduler.service.current_mode", new=AsyncMock(return_value=None)):
+        yield
 
 
 # ─────────────────────────────────────────────────────────────────────

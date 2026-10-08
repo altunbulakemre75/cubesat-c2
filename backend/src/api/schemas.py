@@ -75,6 +75,9 @@ class CommandCreate(BaseModel):
     safe_retry: bool = False
     idempotency_key: str | None = Field(default=None, max_length=128)
     scheduled_at: datetime | None = None
+    # Required when the satellite's mode is unknown or stale (no telemetry
+    # for 2 h): the operator acknowledges the policy can't be checked now.
+    confirm_unverified_mode: bool = False
 
 
 class CommandOut(BaseModel):

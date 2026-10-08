@@ -14,7 +14,7 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import asyncpg
 from fastapi.testclient import TestClient
@@ -113,11 +113,10 @@ def _operator(client: TestClient, db: Db) -> dict[str, str]:
 
 
 def test_command_for_unknown_satellite_is_rejected(client: TestClient, db: Db) -> None:
-    with patch("src.api.routes.commands.get_satellite_mode", new=AsyncMock(return_value=None)):
-        resp = client.post(
-            "/commands", json={"satellite_id": "GHOST", "command_type": "ping"},
-            headers=_operator(client, db),
-        )
+    resp = client.post(
+        "/commands", json={"satellite_id": "GHOST", "command_type": "ping"},
+        headers=_operator(client, db),
+    )
     assert resp.status_code == 404
     assert db.fetchval("SELECT COUNT(*) FROM satellites") == 0
 

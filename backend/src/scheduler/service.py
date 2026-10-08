@@ -36,7 +36,9 @@ import asyncpg
 from nats.js import JetStreamContext
 from nats.js.api import ConsumerConfig, DeliverPolicy
 
+from src.commands.mode import current_mode
 from src.commands.models import CommandStatus, MAX_RETRIES, UNSAFE_RETRY_TYPES
+from src.commands.policy import evaluate
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +192,12 @@ class CommandScheduler:
         for row in rows:
             cmd_id = row["id"]
             sat_id = row["satellite_id"]
+
+            # Re-check the mode policy at transmission time: a command queued
+            # hours ago for the next pass may no longer be allowed.
+            if await self._drop_if_policy_denies(cmd_id, sat_id, row["command_type"]):
+                continue
+
             # Move to TRANSMITTING — guard against double-pickup
             async with self._pool.acquire() as conn:
                 claimed = await conn.execute(
@@ -247,6 +255,28 @@ class CommandScheduler:
             self.transmitted_count += 1
             logger.info("SENT | cmd=%s sat=%s type=%s",
                         cmd_id, sat_id, row["command_type"])
+
+    async def _drop_if_policy_denies(self, cmd_id: str, sat_id: str, command_type: str) -> bool:
+        reading = await current_mode(self._pool, sat_id)
+        if reading is None or reading.stale:
+            return False  # unverifiable — the creator confirmed at queue time
+        decision = evaluate(command_type, reading.mode)
+        if decision:
+            return False
+        async with self._pool.acquire() as conn:
+            dropped = await conn.execute(
+                """
+                UPDATE commands
+                   SET status = 'dead', error_message = $2, updated_at = NOW()
+                 WHERE id = $1 AND status = 'scheduled'
+                """,
+                cmd_id, f"Policy denied at transmission: {decision.reason}",
+            )
+        if dropped == "UPDATE 1":
+            self.dead_count += 1
+            logger.warning("DROPPED | cmd=%s sat=%s mode=%s: %s",
+                           cmd_id, sat_id, reading.mode.value, decision.reason)
+        return True
 
     # ─────────────────────────────────────────────────────────────────────
     # SENT → ACKED  (via NATS commands.ack.>)
