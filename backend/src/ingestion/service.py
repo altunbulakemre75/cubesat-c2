@@ -15,8 +15,9 @@ import logging
 
 import asyncpg
 import nats.js.errors
-from nats.js import JetStreamContext
 from nats.aio.msg import Msg
+from nats.js import JetStreamContext
+from nats.js.api import StreamConfig
 
 from src.ingestion.adapters import get_adapter
 from src.ingestion.adapters.base import ProtocolAdapter
@@ -33,6 +34,9 @@ _STREAM_SUBJECTS = [
     "commands.>",
     "events.>",
 ]
+# docs/YOL_HARITASI.md: 7-day retention. Long-term history lives in
+# TimescaleDB; the stream only needs to cover outages and replays.
+STREAM_MAX_AGE_S = 7 * 24 * 3600
 _RAW_SUBJECT = "telemetry.raw.*"
 _CANONICAL_PREFIX = "telemetry.canonical"
 _DURABLE_NAME = "ingestion"
@@ -40,24 +44,29 @@ _DURABLE_NAME = "ingestion"
 
 async def ensure_stream(js: JetStreamContext) -> None:
     """Create or update the cubesat JetStream stream so it always carries the
-    full subject list. If subjects drift over deploys (e.g. a new events.*
-    pattern is added), update the existing stream rather than silently
-    publishing into the void."""
+    full subject list and retention limit. If either drifts over deploys
+    (e.g. a new events.* pattern, or a stream created by v0.1.0 without a
+    max age), update the existing stream rather than silently publishing
+    into the void or growing the disk without bound."""
+    wanted = StreamConfig(
+        name=_STREAM_NAME, subjects=_STREAM_SUBJECTS, max_age=STREAM_MAX_AGE_S,
+    )
     try:
         info = await js.stream_info(_STREAM_NAME)
-        existing = set(info.config.subjects or [])
-        wanted = set(_STREAM_SUBJECTS)
-        if existing != wanted:
-            await js.update_stream(name=_STREAM_NAME, subjects=_STREAM_SUBJECTS)
-            logger.info("Updated NATS stream '%s' subjects: %s -> %s",
-                        _STREAM_NAME, sorted(existing), sorted(wanted))
-        else:
-            logger.debug("NATS stream '%s' already exists with correct subjects",
-                         _STREAM_NAME)
     except nats.js.errors.NotFoundError:
-        await js.add_stream(name=_STREAM_NAME, subjects=_STREAM_SUBJECTS)
+        await js.add_stream(wanted)
         logger.info("Created NATS stream '%s' with subjects: %s",
                     _STREAM_NAME, _STREAM_SUBJECTS)
+        return
+
+    same_subjects = set(info.config.subjects or []) == set(_STREAM_SUBJECTS)
+    same_age = (info.config.max_age or 0) == STREAM_MAX_AGE_S
+    if same_subjects and same_age:
+        logger.debug("NATS stream '%s' already up to date", _STREAM_NAME)
+        return
+    await js.update_stream(wanted)
+    logger.info("Updated NATS stream '%s' (subjects %s, max_age %ss)",
+                _STREAM_NAME, sorted(_STREAM_SUBJECTS), STREAM_MAX_AGE_S)
 
 
 class IngestionService:
@@ -128,13 +137,16 @@ class IngestionService:
         out_subject = f"{_CANONICAL_PREFIX}.{canonical.satellite_id}"
         try:
             await self._js.publish(out_subject, canonical.model_dump_json().encode())
-            logger.debug(
-                "Canonical published | sat=%s seq=%d mode=%s",
-                canonical.satellite_id,
-                canonical.sequence,
-                canonical.params.mode.value,
-            )
         except Exception as exc:  # noqa: BLE001
+            # Leave the raw frame on the stream for redelivery; acking here
+            # (as v0.1.0 did in a `finally`) silently lost the frame.
             logger.error("Failed to publish canonical | subject=%s: %s", out_subject, exc)
-        finally:
-            await msg.ack()
+            await msg.nak()
+            return
+        logger.debug(
+            "Canonical published | sat=%s seq=%d mode=%s",
+            canonical.satellite_id,
+            canonical.sequence,
+            canonical.params.mode.value,
+        )
+        await msg.ack()

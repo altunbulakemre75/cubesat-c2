@@ -91,8 +91,11 @@ class TelemetryWriter:
                 pass
             return
 
+        # put_nowait, not `await put()`: put() never raises QueueFull — it
+        # blocks the subscription callback until JetStream's ack wait runs
+        # out and redelivers anyway. NAK at once and let NATS hold it.
         try:
-            await self._queue.put((telemetry, msg))
+            self._queue.put_nowait((telemetry, msg))
         except asyncio.QueueFull:
             logger.error("Writer queue full — NAKing msg %s", msg.subject)
             try:

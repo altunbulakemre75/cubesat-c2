@@ -182,7 +182,11 @@ async def test_valid_json_but_wrong_schema_terminates():
 @pytest.mark.asyncio
 async def test_queue_full_naks_for_backpressure():
     """When the in-memory queue is saturated, we'd rather NATS hold the
-    message than drop it on the floor."""
+    message (and redeliver it) than block the subscription callback.
+    The old implementation awaited queue.put(), which never raises
+    QueueFull — it blocked until JetStream's ack wait expired."""
+    import asyncio
+
     js = MagicMock()
     js.publish = AsyncMock()
     pool = _Pool()
@@ -205,13 +209,7 @@ async def test_queue_full_naks_for_backpressure():
     msg.nak = AsyncMock()
     msg.term = AsyncMock()
 
-    # Replace queue with a full one so put_nowait raises in callback path.
-    # Easier: monkeypatch put to raise QueueFull.
-    import asyncio
-    async def boom(_):
-        raise asyncio.QueueFull
-    w._queue.put = boom  # type: ignore[assignment]
-    await w._enqueue(msg)
+    await asyncio.wait_for(w._enqueue(msg), timeout=1.0)
     msg.nak.assert_awaited()
 
 
