@@ -51,6 +51,17 @@ _MIN_WINDOW_LEFT_S = 30.0
 # docs/MIMARI.md: exponential backoff between retries.
 RETRY_BACKOFF_S = (1, 4, 16)
 
+# A satellite answer (ACK or NACK) is valid for any command that has been
+# transmitted at least once and isn't finished yet. Matching only
+# status = 'sent' dropped ACKs that overtook the executor's own
+# 'transmitting' → 'sent' update, and late ACKs that arrived after a
+# timeout had already scheduled a retry.
+_ANSWERABLE = """
+    id = $1
+    AND status NOT IN ('acked', 'dead')
+    AND (status = 'transmitting' OR sent_at IS NOT NULL)
+"""
+
 
 def _cmd_subject(satellite_id: str) -> str:
     return f"commands.{satellite_id}"
@@ -398,9 +409,9 @@ class CommandScheduler:
                 UPDATE commands
                    SET status = 'acked',
                        acked_at = NOW(),
+                       sent_at = COALESCE(sent_at, NOW()),
                        updated_at = NOW()
-                 WHERE id = $1 AND status = 'sent'
-                """,
+                 WHERE """ + _ANSWERABLE,
                 cmd_id,
             )
         if result == "UPDATE 1":
@@ -487,9 +498,9 @@ class CommandScheduler:
             result = await conn.execute(
                 """
                 UPDATE commands
-                   SET status = 'dead', error_message = $2, updated_at = NOW()
-                 WHERE id = $1 AND status = 'sent'
-                """,
+                   SET status = 'dead', error_message = $2,
+                       sent_at = COALESCE(sent_at, NOW()), updated_at = NOW()
+                 WHERE """ + _ANSWERABLE,
                 cmd_id, f"Satellite rejected: {error}",
             )
         if result == "UPDATE 1":

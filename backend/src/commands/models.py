@@ -48,6 +48,10 @@ _TRANSITIONS: dict[CommandStatus, set[CommandStatus]] = {
     CommandStatus.DEAD: set(),                           # terminal
 }
 
+# Note: a satellite's ACK/NACK is applied by the scheduler to any command
+# that was transmitted and isn't finished (it can overtake the SENT update,
+# or arrive after a timeout scheduled a retry); it is not limited to SENT.
+
 # Public alias — the REST layer validates DB-level transitions against the
 # same table instead of keeping its own copy in sync by hand.
 TRANSITIONS = _TRANSITIONS

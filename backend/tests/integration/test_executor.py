@@ -140,3 +140,59 @@ def test_timeout_of_an_already_acked_command_is_ignored(db: Db, test_dsn: str) -
     asyncio.run(_main())
 
     assert _status(db, cmd)["status"] == "acked"
+
+
+# ── ACK timing ───────────────────────────────────────────────────────────────
+# Found end-to-end: the simulator ACKs within milliseconds, i.e. before
+# the executor has moved the command from 'transmitting' to 'sent'. The ACK
+# was matched with "WHERE status = 'sent'", found nothing, and was dropped;
+# the command then timed out although the satellite had executed it.
+
+def _apply(dsn: str, method: str, cmd_id: str, *args: str) -> None:
+    async def _main() -> None:
+        pool = await asyncpg.create_pool(dsn, init=_init_connection, min_size=1, max_size=2)
+        try:
+            await getattr(CommandScheduler(pool, _JS()), method)(cmd_id, *args)  # type: ignore[arg-type]
+        finally:
+            await pool.close()
+    asyncio.run(_main())
+
+
+def test_ack_that_overtakes_the_sent_update_is_recorded(db: Db, test_dsn: str) -> None:
+    cmd = _due(db)
+    db.execute("UPDATE commands SET status = 'transmitting' WHERE id = $1::uuid", cmd)
+
+    _apply(test_dsn, "_mark_acked", cmd)
+
+    assert _status(db, cmd)["status"] == "acked"
+
+
+def test_late_ack_after_a_retry_was_scheduled_is_recorded(db: Db, test_dsn: str) -> None:
+    # The satellite did execute the first transmission; its ACK just came
+    # after our timeout. Recording it prevents a pointless retransmission.
+    cmd = _due(db)
+    db.execute(
+        "UPDATE commands SET status = 'scheduled', retry_count = 1, sent_at = NOW() - interval '70 seconds' "
+        "WHERE id = $1::uuid", cmd,
+    )
+
+    _apply(test_dsn, "_mark_acked", cmd)
+
+    assert _status(db, cmd)["status"] == "acked"
+
+
+def test_ack_for_a_never_transmitted_command_is_ignored(db: Db, test_dsn: str) -> None:
+    cmd = _due(db)   # scheduled, never sent
+
+    _apply(test_dsn, "_mark_acked", cmd)
+
+    assert _status(db, cmd)["status"] == "scheduled"
+
+
+def test_nack_that_overtakes_the_sent_update_is_recorded(db: Db, test_dsn: str) -> None:
+    cmd = _due(db)
+    db.execute("UPDATE commands SET status = 'transmitting' WHERE id = $1::uuid", cmd)
+
+    _apply(test_dsn, "_mark_rejected", cmd, "unsupported command type")
+
+    assert _status(db, cmd)["status"] == "dead"
