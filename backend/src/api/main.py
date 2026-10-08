@@ -1,10 +1,10 @@
 """FastAPI application factory."""
 
 import asyncio
+import inspect
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import cast
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -132,8 +132,12 @@ def create_app() -> FastAPI:
         async def _redis() -> bool:
             from src.storage import redis_client
             client = redis_client.get_client()
-            # redis.asyncio's ping is async; its stubs type it as bool | Awaitable.
-            return bool(await cast(Awaitable[bool], client.ping()))
+            # redis-py's stubs type ping() as bool | Awaitable[bool] in some
+            # versions and Awaitable[bool] in others; handle both.
+            result: object = client.ping()
+            if inspect.isawaitable(result):
+                result = await result
+            return bool(result)
 
         db_ok, nats_ok, redis_ok = await asyncio.gather(
             _safe(_db), _safe(_nats), _safe(_redis),
