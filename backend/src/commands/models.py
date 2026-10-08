@@ -35,10 +35,16 @@ _TRANSITIONS: dict[CommandStatus, set[CommandStatus]] = {
     CommandStatus.PENDING: {CommandStatus.SCHEDULED, CommandStatus.DEAD},
     CommandStatus.SCHEDULED: {CommandStatus.TRANSMITTING, CommandStatus.PENDING, CommandStatus.DEAD},
     CommandStatus.TRANSMITTING: {CommandStatus.SENT, CommandStatus.TIMEOUT},
-    CommandStatus.SENT: {CommandStatus.ACKED, CommandStatus.TIMEOUT},
+    # SENT → DEAD: the satellite NACKed the command (retrying can't help).
+    CommandStatus.SENT: {CommandStatus.ACKED, CommandStatus.TIMEOUT, CommandStatus.DEAD},
     CommandStatus.ACKED: set(),                          # terminal
     CommandStatus.TIMEOUT: {CommandStatus.RETRY, CommandStatus.DEAD},
-    CommandStatus.RETRY: {CommandStatus.TRANSMITTING, CommandStatus.DEAD},
+    # RETRY re-enters the schedule: SCHEDULED after a backoff within the
+    # pass, PENDING when LOS ended the pass (wait for the next one).
+    CommandStatus.RETRY: {
+        CommandStatus.TRANSMITTING, CommandStatus.SCHEDULED,
+        CommandStatus.PENDING, CommandStatus.DEAD,
+    },
     CommandStatus.DEAD: set(),                           # terminal
 }
 

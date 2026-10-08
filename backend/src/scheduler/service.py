@@ -48,6 +48,8 @@ _TIMEOUT_INTERVAL_S = 10.0    # how often to scan SENT commands for ACK timeout
 ACK_TIMEOUT_S = 60.0          # how long to wait for an ACK after publishing
 # A pass that ends sooner than this is not worth starting an uplink in.
 _MIN_WINDOW_LEFT_S = 30.0
+# docs/MIMARI.md: exponential backoff between retries.
+RETRY_BACKOFF_S = (1, 4, 16)
 
 
 def _cmd_subject(satellite_id: str) -> str:
@@ -180,7 +182,8 @@ class CommandScheduler:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, satellite_id, command_type, params, retry_count
+                SELECT id, satellite_id, command_type, params, retry_count,
+                       scheduled_manually
                 FROM commands
                 WHERE status = 'scheduled'
                   AND scheduled_at <= NOW()
@@ -192,6 +195,13 @@ class CommandScheduler:
         for row in rows:
             cmd_id = row["id"]
             sat_id = row["satellite_id"]
+
+            # A pass-planned command only goes out while the satellite is in
+            # view of an uplink station. If its window was missed (e.g. the
+            # backend was down during the pass) re-plan instead of
+            # transmitting into an empty sky. Operator-set times override.
+            if not row["scheduled_manually"] and await self._replan_if_window_missed(row):
+                continue
 
             # Re-check the mode policy at transmission time: a command queued
             # hours ago for the next pass may no longer be allowed.
@@ -255,6 +265,22 @@ class CommandScheduler:
             self.transmitted_count += 1
             logger.info("SENT | cmd=%s sat=%s type=%s",
                         cmd_id, sat_id, row["command_type"])
+
+    async def _replan_if_window_missed(self, row: asyncpg.Record) -> bool:
+        async with self._pool.acquire() as conn:
+            if await self._window_open(conn, row["satellite_id"]):
+                return False
+            await conn.execute(
+                """
+                UPDATE commands
+                   SET status = 'pending', scheduled_at = NULL, updated_at = NOW()
+                 WHERE id = $1 AND status = 'scheduled'
+                """,
+                row["id"],
+            )
+        logger.warning("Missed uplink window → re-planned | cmd=%s sat=%s",
+                       row["id"], row["satellite_id"])
+        return True
 
     async def _drop_if_policy_denies(self, cmd_id: str, sat_id: str, command_type: str) -> bool:
         reading = await current_mode(self._pool, sat_id)
@@ -351,7 +377,7 @@ class CommandScheduler:
                 if ok:
                     await self._mark_acked(cmd_id)
                 else:
-                    await self._mark_timed_out(cmd_id, error or "satellite returned error")
+                    await self._mark_rejected(cmd_id, error or "satellite returned an error")
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Ack apply failed | cmd=%s: %s", cmd_id, exc)
                 try:
@@ -382,65 +408,108 @@ class CommandScheduler:
             logger.info("ACKED | cmd=%s", cmd_id)
 
     async def _mark_timed_out(self, cmd_id: str, reason: str) -> None:
-        async with self._pool.acquire() as conn:
+        """SENT → TIMEOUT, then (docs/MIMARI.md section C):
+        - LOS protection: if the uplink window has closed, the timeout is the
+          pass's fault, not the command's — re-plan for the next pass
+          without consuming a retry;
+        - otherwise retry after an exponential backoff (1 s, 4 s, 16 s),
+          at most MAX_RETRIES times, and only for safe_retry commands;
+        - else DEAD."""
+        async with self._pool.acquire() as conn, conn.transaction():
             row = await conn.fetchrow(
-                "SELECT status, command_type, safe_retry, retry_count FROM commands WHERE id = $1",
-                cmd_id,
-            )
-            if not row or row["status"] != "sent":
-                return
-            await conn.execute(
                 """
                 UPDATE commands
-                   SET status = 'timeout',
-                       error_message = $2,
-                       updated_at = NOW()
+                   SET status = 'timeout', error_message = $2, updated_at = NOW()
                  WHERE id = $1 AND status = 'sent'
+                RETURNING satellite_id, command_type, safe_retry, retry_count,
+                          scheduled_manually
                 """,
                 cmd_id, reason,
             )
-        self.timed_out_count += 1
+            if row is None:
+                return  # already ACKed / handled elsewhere
+            self.timed_out_count += 1
 
-        can_retry = (
-            row["safe_retry"]
-            and row["command_type"] not in UNSAFE_RETRY_TYPES
-            and row["retry_count"] < MAX_RETRIES
-        )
-        async with self._pool.acquire() as conn:
-            if can_retry:
+            retryable = row["safe_retry"] and row["command_type"] not in UNSAFE_RETRY_TYPES
+            window_lost = (
+                not row["scheduled_manually"]
+                and not await self._window_open(conn, row["satellite_id"])
+            )
+
+            if retryable and window_lost:
                 await conn.execute(
-                    """
-                    UPDATE commands
-                       SET status = 'retry',
-                           retry_count = retry_count + 1,
-                           updated_at = NOW()
-                     WHERE id = $1 AND status = 'timeout'
-                    """,
+                    "UPDATE commands SET status = 'retry', updated_at = NOW() WHERE id = $1",
                     cmd_id,
                 )
-                # Move retry → scheduled (next pass) so executor picks it up
                 await conn.execute(
                     """
                     UPDATE commands
-                       SET status = 'scheduled',
-                           updated_at = NOW()
+                       SET status = 'pending', scheduled_at = NULL, updated_at = NOW()
                      WHERE id = $1 AND status = 'retry'
                     """,
                     cmd_id,
                 )
-                logger.warning("TIMEOUT→RETRY | cmd=%s reason=%s", cmd_id, reason)
-            else:
+                logger.warning("TIMEOUT after LOS → re-planned for next pass | cmd=%s", cmd_id)
+            elif retryable and row["retry_count"] < MAX_RETRIES:
+                delay = RETRY_BACKOFF_S[min(row["retry_count"], len(RETRY_BACKOFF_S) - 1)]
                 await conn.execute(
                     """
                     UPDATE commands
-                       SET status = 'dead',
-                           updated_at = NOW()
-                     WHERE id = $1 AND status = 'timeout'
+                       SET status = 'retry', retry_count = retry_count + 1, updated_at = NOW()
+                     WHERE id = $1
                     """,
+                    cmd_id,
+                )
+                await conn.execute(
+                    """
+                    UPDATE commands
+                       SET status = 'scheduled',
+                           scheduled_at = NOW() + make_interval(secs => $2),
+                           updated_at = NOW()
+                     WHERE id = $1 AND status = 'retry'
+                    """,
+                    cmd_id, float(delay),
+                )
+                logger.warning("TIMEOUT→RETRY in %ss | cmd=%s reason=%s", delay, cmd_id, reason)
+            else:
+                await conn.execute(
+                    "UPDATE commands SET status = 'dead', updated_at = NOW() "
+                    "WHERE id = $1 AND status = 'timeout'",
                     cmd_id,
                 )
                 self.dead_count += 1
                 logger.warning("TIMEOUT→DEAD | cmd=%s reason=%s", cmd_id, reason)
+
+    async def _mark_rejected(self, cmd_id: str, error: str) -> None:
+        """The satellite received the command and refused it. Retrying can't
+        change its answer, so the command ends here."""
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE commands
+                   SET status = 'dead', error_message = $2, updated_at = NOW()
+                 WHERE id = $1 AND status = 'sent'
+                """,
+                cmd_id, f"Satellite rejected: {error}",
+            )
+        if result == "UPDATE 1":
+            self.dead_count += 1
+            logger.warning("NACK→DEAD | cmd=%s: %s", cmd_id, error)
+
+    async def _window_open(self, conn: asyncpg.Connection, satellite_id: str) -> bool:
+        """Is the satellite inside a pass over an uplink-capable station now?"""
+        return bool(await conn.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM pass_schedule p
+                  JOIN ground_stations g ON g.id = p.station_id
+                 WHERE p.satellite_id = $1
+                   AND g.uplink_capable AND g.active
+                   AND p.aos <= NOW() AND p.los > NOW()
+            )
+            """,
+            satellite_id,
+        ))
 
     # ─────────────────────────────────────────────────────────────────────
     # SENT timeout sweep (in case satellite never replies)
