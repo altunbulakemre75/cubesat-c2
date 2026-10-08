@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Query
 
@@ -15,12 +16,12 @@ async def list_passes(
     satellite_id: str | None = Query(default=None),
     from_time: datetime | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
-):
+) -> list[PassOut]:
     if from_time is None:
         from_time = datetime.now(UTC)
 
     conditions = ["p.aos >= $1"]
-    args: list = [from_time]
+    args: list[Any] = [from_time]
 
     if satellite_id:
         args.append(satellite_id)

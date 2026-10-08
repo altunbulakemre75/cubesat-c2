@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Response, status
@@ -31,7 +32,9 @@ class TransitionRequest(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("", response_model=CommandOut, status_code=status.HTTP_201_CREATED)
-async def create_command(body: CommandCreate, pool: Pool, user: CurrentUser, response: Response):
+async def create_command(
+    body: CommandCreate, pool: Pool, user: CurrentUser, response: Response,
+) -> CommandOut:
     require_role(Role.OPERATOR, user["role"])
 
     # Admin-only commands require admin role
@@ -164,7 +167,7 @@ async def _check_mode_policy(
 
 
 @router.post("/{command_id}/approve", response_model=CommandOut)
-async def approve_command(command_id: str, pool: Pool, user: CurrentUser):
+async def approve_command(command_id: str, pool: Pool, user: CurrentUser) -> CommandOut:
     """Second-admin approval for a critical command. The approver must be a
     different admin than the creator; the mode policy is re-checked because
     the satellite may have changed mode since the request was made."""
@@ -220,7 +223,7 @@ async def transition_command(
     body: TransitionRequest,
     pool: Pool,
     user: CurrentUser,
-):
+) -> CommandOut:
     """
     Advance a command through the state machine.
 
@@ -276,7 +279,7 @@ async def transition_command(
         # state we validated: the scheduler runs concurrently, and a plain
         # "WHERE id = $1" could overwrite a transition it made meanwhile.
         updates = ["status = $2", "updated_at = NOW()"]
-        args: list = [command_id, target.value, current.value]
+        args: list[Any] = [command_id, target.value, current.value]
 
         if target == CommandStatus.SENT:
             updates.append("sent_at = NOW()")
@@ -319,9 +322,9 @@ async def list_commands(
     satellite_id: str | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, ge=1, le=200),
-):
+) -> list[CommandOut]:
     conditions = ["TRUE"]
-    args: list = []
+    args: list[Any] = []
     if satellite_id:
         args.append(satellite_id)
         conditions.append(f"satellite_id = ${len(args)}")
@@ -342,7 +345,7 @@ async def list_commands(
 
 
 @router.delete("/{command_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def cancel_command(command_id: str, pool: Pool, user: CurrentUser):
+async def cancel_command(command_id: str, pool: Pool, user: CurrentUser) -> None:
     require_role(Role.OPERATOR, user["role"])
     async with pool.acquire() as conn:
         result = await conn.execute(
@@ -365,7 +368,7 @@ async def cancel_command(command_id: str, pool: Pool, user: CurrentUser):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _row_to_command(row) -> CommandOut:
+def _row_to_command(row: asyncpg.Record) -> CommandOut:
     return CommandOut(
         id=str(row["id"]),
         satellite_id=row["satellite_id"],

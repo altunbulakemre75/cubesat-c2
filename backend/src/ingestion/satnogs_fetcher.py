@@ -30,6 +30,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime
+from typing import Any
 
 import asyncpg
 
@@ -56,7 +57,7 @@ def _parse_iso(value: str | None) -> datetime | None:
         return None
 
 
-def _coerce_decoded(decoded: object) -> dict | None:
+def _coerce_decoded(decoded: object) -> dict[str, Any] | None:
     """SatNOGS DB sends 'decoded' as either a JSON string or plain text.
     Always store something useful — never silently drop the field."""
     if decoded is None or decoded == "":

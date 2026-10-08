@@ -29,7 +29,9 @@ _HISTORY = 1000  # remembered command ids per satellite
 
 
 class _Subscriber(Protocol):
-    async def subscribe(self, subject: str, cb: Callable[[Any], Awaitable[None]]) -> Any: ...
+    async def subscribe(
+        self, subject: str, *, cb: Callable[[Any], Awaitable[None]],
+    ) -> Any: ...
 
 
 class _Publisher(Protocol):

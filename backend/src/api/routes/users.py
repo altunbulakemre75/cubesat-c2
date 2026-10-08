@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
@@ -35,7 +37,7 @@ class ActiveChange(BaseModel):
 
 
 @router.get("", response_model=list[UserOut])
-async def list_users(pool: Pool, user: CurrentUser):
+async def list_users(pool: Pool, user: CurrentUser) -> list[UserOut]:
     require_role(Role.ADMIN, user["role"])
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -45,7 +47,7 @@ async def list_users(pool: Pool, user: CurrentUser):
 
 
 @router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-async def create_user(body: UserCreate, pool: Pool, user: CurrentUser):
+async def create_user(body: UserCreate, pool: Pool, user: CurrentUser) -> UserOut:
     require_role(Role.ADMIN, user["role"])
 
     # Sorun 1: password policy backend'de de kontrol edilmeli (frontend bypass'ı önler)
@@ -86,7 +88,9 @@ async def create_user(body: UserCreate, pool: Pool, user: CurrentUser):
 
 
 @router.patch("/{username}/role")
-async def change_role(username: str, body: RoleChange, pool: Pool, user: CurrentUser):
+async def change_role(
+    username: str, body: RoleChange, pool: Pool, user: CurrentUser,
+) -> dict[str, Any]:
     require_role(Role.ADMIN, user["role"])
     role = body.role
 
@@ -142,7 +146,9 @@ async def change_role(username: str, body: RoleChange, pool: Pool, user: Current
 
 
 @router.patch("/{username}/active")
-async def set_active(username: str, body: ActiveChange, pool: Pool, user: CurrentUser):
+async def set_active(
+    username: str, body: ActiveChange, pool: Pool, user: CurrentUser,
+) -> dict[str, Any]:
     """Enable or disable an account. Disabling ends every session of that
     user immediately — the offboarding path that previously required a
     manual SQL UPDATE."""

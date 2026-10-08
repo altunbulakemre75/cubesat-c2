@@ -27,6 +27,7 @@ import asyncio
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -74,6 +75,10 @@ class Assessment:
             self.evidence_at = evidence_at
 
 
+# (field name, value, is-out-of-range test, warning text)
+_Check = tuple[str, float | None, Callable[[float], bool], Callable[[float], str]]
+
+
 def assess(
     latest: Observation | None,
     last_pass: LastPass | None,
@@ -105,7 +110,7 @@ def assess(
 
     # Distinguish "field missing" from "value out of range": hiding a missing
     # value behind a sentinel would report broken telemetry as healthy.
-    checks = (
+    checks: tuple[_Check, ...] = (
         ("battery_voltage_v", latest.battery_voltage_v,
          lambda v: v < BATTERY_CRITICAL_V,
          lambda v: f"Battery critical: {v:.2f}V < {BATTERY_CRITICAL_V}V"),

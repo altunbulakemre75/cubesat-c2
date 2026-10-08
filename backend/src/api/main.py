@@ -2,11 +2,13 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from typing import cast
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from src.api.background import BackgroundServices
@@ -96,24 +98,20 @@ def create_app() -> FastAPI:
     app.include_router(ws_router)
 
     @app.get("/health", tags=["system"])
-    async def health() -> dict:
+    async def health() -> dict[str, str]:
         """Liveness probe: returns ok as long as the process is running.
         Does not check downstreams — those belong on /ready."""
         return {"status": "ok"}
 
     @app.get("/ready", tags=["system"])
-    async def ready() -> dict | tuple:
+    async def ready() -> JSONResponse:
         """Readiness probe: returns ok only when DB, NATS and Redis are
         all reachable. Used by k8s/docker to decide when to route traffic.
         Each downstream is timeboxed (2s wall clock) so a hung dependency
         can't pin the probe response."""
-        import asyncio
-
-        from fastapi.responses import JSONResponse
-
         _PROBE_TIMEOUT_S = 2.0
 
-        async def _safe(coro_factory) -> bool:
+        async def _safe(coro_factory: Callable[[], Awaitable[bool]]) -> bool:
             """Run the check; any exception OR timeout = unhealthy."""
             try:
                 return await asyncio.wait_for(coro_factory(), timeout=_PROBE_TIMEOUT_S)
@@ -134,7 +132,8 @@ def create_app() -> FastAPI:
         async def _redis() -> bool:
             from src.storage import redis_client
             client = redis_client.get_client()
-            return bool(await client.ping())
+            # redis.asyncio's ping is async; its stubs type it as bool | Awaitable.
+            return bool(await cast(Awaitable[bool], client.ping()))
 
         db_ok, nats_ok, redis_ok = await asyncio.gather(
             _safe(_db), _safe(_nats), _safe(_redis),
@@ -143,9 +142,8 @@ def create_app() -> FastAPI:
             "status": "ok" if (db_ok and nats_ok and redis_ok) else "degraded",
             "checks": {"db": db_ok, "nats": nats_ok, "redis": redis_ok},
         }
-        if not (db_ok and nats_ok and redis_ok):
-            return JSONResponse(content=body, status_code=503)
-        return body
+        healthy = db_ok and nats_ok and redis_ok
+        return JSONResponse(content=body, status_code=200 if healthy else 503)
 
     return app
 

@@ -69,7 +69,8 @@ def _make_token(subject: str, *, version: int, ttl: timedelta, kind: str) -> str
         "iat": now,
         "exp": now + ttl,
     }
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    token: str = jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return token
 
 
 def create_access_token(subject: str, version: int = 0) -> str:
@@ -93,7 +94,10 @@ def create_refresh_token(subject: str, version: int = 0) -> str:
 def decode_token(token: str) -> dict[str, Any]:
     """Raises JWTError on invalid/expired token. Checks signature only —
     use load_session() to decide whether the session is still valid."""
-    return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+    claims: dict[str, Any] = jwt.decode(
+        token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm],
+    )
+    return claims
 
 
 # ── Session validation ───────────────────────────────────────────────────────
@@ -205,7 +209,8 @@ def create_ws_ticket(username: str, version: int, access_jti: str, access_exp: i
         "iat": now,
         "exp": now + timedelta(seconds=WS_TICKET_TTL_S),
     }
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    ticket: str = jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return ticket
 
 
 async def revoke_token(

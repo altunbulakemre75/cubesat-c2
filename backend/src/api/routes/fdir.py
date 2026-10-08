@@ -8,6 +8,7 @@ Both require operator role; no admin-only paths.
 """
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -38,11 +39,11 @@ async def list_alerts(
     satellite_id: str | None = Query(default=None),
     unacknowledged_only: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=500),
-):
+) -> list[FDIRAlertOut]:
     require_role(Role.VIEWER, user["role"])
 
     conditions = ["TRUE"]
-    args: list = []
+    args: list[Any] = []
     if satellite_id:
         args.append(satellite_id)
         conditions.append(f"satellite_id = ${len(args)}")
@@ -76,7 +77,7 @@ async def list_alerts(
 
 
 @router.post("/alerts/{alert_id}/ack", response_model=FDIRAlertOut)
-async def acknowledge_alert(alert_id: str, pool: Pool, user: CurrentUser):
+async def acknowledge_alert(alert_id: str, pool: Pool, user: CurrentUser) -> FDIRAlertOut:
     require_role(Role.OPERATOR, user["role"])
 
     try:

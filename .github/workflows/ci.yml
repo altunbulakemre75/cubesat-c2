@@ -44,6 +44,10 @@ jobs:
         working-directory: backend
         run: ruff check src tests --output-format=github
 
+      - name: Type check (mypy --strict)
+        working-directory: backend
+        run: mypy src
+
       - name: Start NATS with the repo's ACLs
         # Service containers start before checkout, so they can't mount the
         # config file; run this one by hand.
@@ -86,6 +90,10 @@ jobs:
       - name: Lint (ruff)
         working-directory: simulator
         run: ruff check src tests --output-format=github
+
+      - name: Type check (mypy --strict)
+        working-directory: simulator
+        run: mypy src
 
       - name: Run simulator tests
         working-directory: simulator

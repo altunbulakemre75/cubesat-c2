@@ -46,7 +46,7 @@ class LogoutRequest(BaseModel):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, request: Request, pool: Pool):
+async def login(body: LoginRequest, request: Request, pool: Pool) -> TokenResponse:
     # Rate limit BEFORE the bcrypt verify — otherwise an attacker can
     # still burn server CPU on bcrypt rounds for every probe.
     if not await check_login_rate(request, body.username):
@@ -91,7 +91,7 @@ async def login(body: LoginRequest, request: Request, pool: Pool):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token_endpoint(body: RefreshRequest, pool: Pool):
+async def refresh_token_endpoint(body: RefreshRequest, pool: Pool) -> TokenResponse:
     """Exchange a refresh token for a new token pair. The old refresh token
     is revoked (rotation); presenting it again means a copy leaked, so the
     user's whole session family is ended."""
@@ -133,7 +133,7 @@ async def ws_ticket(user: CurrentUser) -> WsTicketResponse:
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(pool: Pool, user: CurrentUser, body: LogoutRequest | None = None):
+async def logout(pool: Pool, user: CurrentUser, body: LogoutRequest | None = None) -> None:
     """Revoke the caller's access token and, if supplied, the refresh token
     issued alongside it. Re-login afterwards is unaffected."""
     await revoke_token(pool, user["jti"], user["username"], user["expires_at"])
@@ -154,7 +154,7 @@ async def change_password(
     body: ChangePasswordRequest,
     pool: Pool,
     user: CurrentUser,
-):
+) -> TokenResponse:
     """Change the caller's password. Every existing session (including the
     one making this call) ends; the response carries a fresh token pair so
     the current client stays logged in."""

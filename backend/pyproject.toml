@@ -52,6 +52,12 @@ ignore = ["UP042"]
 python_version = "3.11"
 strict = true
 
+# These ship without type information (no py.typed, no stubs in the
+# dependency set). Adding stub packages would be a new dependency.
+[[tool.mypy.overrides]]
+module = ["asyncpg", "asyncpg.*", "jose", "jose.*", "sgp4", "sgp4.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

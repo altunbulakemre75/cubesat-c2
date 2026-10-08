@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import APIRouter, Query
 
 from src.api.deps import CurrentUser, Pool
@@ -14,9 +16,9 @@ async def list_anomalies(
     severity: str | None = Query(default=None),
     acknowledged: bool | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
-):
+) -> list[AnomalyOut]:
     conditions = ["TRUE"]
-    args: list = []
+    args: list[Any] = []
 
     if satellite_id:
         args.append(satellite_id)

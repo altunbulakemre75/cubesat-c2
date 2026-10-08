@@ -33,7 +33,7 @@ class StationOut(BaseModel):
 
 
 @router.get("", response_model=list[StationOut])
-async def list_stations(pool: Pool, user: CurrentUser):
+async def list_stations(pool: Pool, user: CurrentUser) -> list[StationOut]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM ground_stations WHERE active = TRUE ORDER BY name"
@@ -42,7 +42,7 @@ async def list_stations(pool: Pool, user: CurrentUser):
 
 
 @router.post("", response_model=StationOut, status_code=status.HTTP_201_CREATED)
-async def create_station(body: StationCreate, pool: Pool, user: CurrentUser):
+async def create_station(body: StationCreate, pool: Pool, user: CurrentUser) -> StationOut:
     require_role(Role.ADMIN, user["role"])
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -64,7 +64,7 @@ async def create_station(body: StationCreate, pool: Pool, user: CurrentUser):
 
 
 @router.delete("/{station_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_station(station_id: int, pool: Pool, user: CurrentUser):
+async def delete_station(station_id: int, pool: Pool, user: CurrentUser) -> None:
     require_role(Role.ADMIN, user["role"])
     async with pool.acquire() as conn:
         result = await conn.execute(

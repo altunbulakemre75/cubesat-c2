@@ -58,7 +58,7 @@ async def sync_satellite(
     user: CurrentUser,
     background_tasks: BackgroundTasks,
     norad_id: int = Query(..., description="NORAD catalog number (e.g. 25544 for ISS)"),
-):
+) -> dict[str, Any]:
     """
     Fetch latest TLE from SatNOGS DB for a NORAD ID, store it under satellite_id,
     and trigger pass computation for all active ground stations.
@@ -124,7 +124,7 @@ async def import_satnogs_stations(
     max_lat: float | None = Query(default=None),
     min_lon: float | None = Query(default=None),
     max_lon: float | None = Query(default=None),
-):
+) -> dict[str, Any]:
     """
     Import SatNOGS online stations into ground_stations table.
     Skips already-imported stations (ON CONFLICT DO NOTHING on satnogs_id).
@@ -134,7 +134,8 @@ async def import_satnogs_stations(
     require_role(Role.ADMIN, user["role"])
 
     # Resolve bbox: custom if all 4 provided, otherwise scope preset
-    if all(x is not None for x in (min_lat, max_lat, min_lon, max_lon)):
+    bbox: tuple[float, float, float, float]
+    if min_lat is not None and max_lat is not None and min_lon is not None and max_lon is not None:
         bbox = (min_lat, max_lat, min_lon, max_lon)
     else:
         if scope not in _BBOX_SCOPES:
@@ -146,7 +147,7 @@ async def import_satnogs_stations(
 
     lat_min, lat_max, lon_min, lon_max = bbox
 
-    client = SatNOGSClient(api_token=getattr(settings, "satnogs_api_token", None))
+    client = SatNOGSClient(api_token=settings.satnogs_api_token)
     try:
         stations = await client.get_stations(status="Online")
     finally:
@@ -230,7 +231,7 @@ async def list_observations(
     satellite_id: str | None = Query(default=None),
     norad_id: int | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
-):
+) -> list[SatnogsObservationOut]:
     """List recent SatNOGS observations persisted by the background fetcher.
 
     Returns the most recent first. Filter by satellite_id (our internal id)
@@ -238,7 +239,7 @@ async def list_observations(
     require_role(Role.VIEWER, user["role"])
 
     conditions = ["TRUE"]
-    args: list = []
+    args: list[Any] = []
     if satellite_id:
         args.append(satellite_id)
         conditions.append(f"satellite_id = ${len(args)}")

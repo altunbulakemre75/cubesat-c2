@@ -14,6 +14,7 @@ Frame layout (matches simulator/src/ax25_framer.py):
 
 import json
 from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -55,9 +56,9 @@ class AX25Adapter(ProtocolAdapter):
             raise ValueError(f"Unexpected PID byte: 0x{raw[15]:02X}, expected 0x{_PID_NO_L3:02X}")
 
     @staticmethod
-    def _parse_info(info: bytes) -> dict:
+    def _parse_info(info: bytes) -> dict[str, Any]:
         try:
-            payload = json.loads(info.decode("utf-8"))
+            payload: dict[str, Any] = json.loads(info.decode("utf-8"))
         except UnicodeDecodeError as exc:
             raise ValueError(f"Information field is not valid UTF-8: {exc}") from exc
         except json.JSONDecodeError as exc:
@@ -69,7 +70,7 @@ class AX25Adapter(ProtocolAdapter):
 
         return payload
 
-    def _to_canonical(self, payload: dict) -> CanonicalTelemetry:
+    def _to_canonical(self, payload: dict[str, Any]) -> CanonicalTelemetry:
         try:
             params = TelemetryParams(
                 battery_voltage_v=payload["battery_voltage_v"],

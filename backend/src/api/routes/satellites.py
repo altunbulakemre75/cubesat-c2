@@ -2,6 +2,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
+import asyncpg
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from pydantic import BaseModel
 from sgp4.api import WGS84, Satrec
@@ -33,7 +34,7 @@ class SatelliteCreate(BaseModel):
 # ── List / Detail ─────────────────────────────────────────────────────────────
 
 @router.get("", response_model=list[SatelliteListItem])
-async def list_satellites(pool: Pool, user: CurrentUser):
+async def list_satellites(pool: Pool, user: CurrentUser) -> list[SatelliteListItem]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT id, name, norad_id FROM satellites WHERE active = TRUE ORDER BY id"
@@ -57,7 +58,7 @@ async def list_satellites(pool: Pool, user: CurrentUser):
 
 
 @router.post("", response_model=SatelliteDetail, status_code=status.HTTP_201_CREATED)
-async def create_satellite(body: SatelliteCreate, pool: Pool, user: CurrentUser):
+async def create_satellite(body: SatelliteCreate, pool: Pool, user: CurrentUser) -> SatelliteDetail:
     require_role(Role.OPERATOR, user["role"])
     async with pool.acquire() as conn:
         try:
@@ -87,7 +88,7 @@ async def create_satellite(body: SatelliteCreate, pool: Pool, user: CurrentUser)
 
 
 @router.delete("/{satellite_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_satellite(satellite_id: str, pool: Pool, user: CurrentUser):
+async def delete_satellite(satellite_id: str, pool: Pool, user: CurrentUser) -> None:
     require_role(Role.ADMIN, user["role"])
     # Sorun 4: tüm DELETE'ler tek transaction — biri başarısız olursa rollback
     async with pool.acquire() as conn:
@@ -106,7 +107,7 @@ async def delete_satellite(satellite_id: str, pool: Pool, user: CurrentUser):
 
 
 @router.get("/{satellite_id}", response_model=SatelliteDetail)
-async def get_satellite(satellite_id: str, pool: Pool, user: CurrentUser):
+async def get_satellite(satellite_id: str, pool: Pool, user: CurrentUser) -> SatelliteDetail:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT id, name, norad_id, description, active, created_at "
@@ -135,7 +136,7 @@ async def get_satellite(satellite_id: str, pool: Pool, user: CurrentUser):
 # ── TLE ───────────────────────────────────────────────────────────────────────
 
 @router.get("/{satellite_id}/tle", response_model=TLEResponse)
-async def get_latest_tle(satellite_id: str, pool: Pool, user: CurrentUser):
+async def get_latest_tle(satellite_id: str, pool: Pool, user: CurrentUser) -> TLEResponse:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT satellite_id, epoch, tle_line1, tle_line2 FROM tle_history "
@@ -154,7 +155,7 @@ async def set_tle(
     pool: Pool,
     user: CurrentUser,
     background_tasks: BackgroundTasks,
-):
+) -> TLEResponse:
     require_role(Role.OPERATOR, user["role"])
 
     # Sorun 3: TLE format + checksum validation via sgp4
@@ -215,7 +216,9 @@ async def set_tle(
 
 # ── Pass computation ──────────────────────────────────────────────────────────
 
-async def _compute_and_store_passes(pool, satellite_id: str, tle1: str, tle2: str) -> None:
+async def _compute_and_store_passes(
+    pool: asyncpg.Pool, satellite_id: str, tle1: str, tle2: str,
+) -> None:
     """Compute 48-hour passes for all active stations and store in pass_schedule."""
     async with pool.acquire() as conn:
         station_rows = await conn.fetch(

@@ -17,7 +17,7 @@ async def get_telemetry(
     limit: int = Query(default=100, ge=1, le=1000),
     from_time: datetime | None = Query(default=None),
     to_time: datetime | None = Query(default=None),
-):
+) -> list[TelemetryPoint]:
     if to_time is None:
         to_time = datetime.now(UTC)
     if from_time is None:

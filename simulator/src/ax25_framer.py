@@ -14,6 +14,7 @@ Frame layout (bytes):
 """
 
 import json
+from typing import Any
 
 from src.satellite import SimulatedTelemetry
 
@@ -39,7 +40,7 @@ def build_frame(telemetry: SimulatedTelemetry, dest: str = GROUND_CALLSIGN) -> b
     dest_addr = encode_callsign(dest, ssid=0, last=False)
     src_addr = encode_callsign(telemetry.satellite_id[:6], ssid=0, last=True)
 
-    payload: dict = {
+    payload: dict[str, Any] = {
         "satellite_id": telemetry.satellite_id,
         "mode": telemetry.mode.value,
         "battery_voltage_v": telemetry.battery_voltage_v,
@@ -55,7 +56,7 @@ def build_frame(telemetry: SimulatedTelemetry, dest: str = GROUND_CALLSIGN) -> b
     return dest_addr + src_addr + bytes([CONTROL_UI, PID_NO_L3]) + info
 
 
-def parse_frame(data: bytes) -> dict:
+def parse_frame(data: bytes) -> dict[str, Any]:
     """
     Decode a frame produced by build_frame().
     Returns the JSON payload as a dict.
@@ -70,6 +71,7 @@ def parse_frame(data: bytes) -> dict:
 
     info = data[16:]
     try:
-        return json.loads(info.decode("utf-8"))
+        payload: dict[str, Any] = json.loads(info.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ValueError(f"Bad information field: {exc}") from exc
+    return payload
