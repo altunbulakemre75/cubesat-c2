@@ -11,7 +11,9 @@ import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from src.orbit.propagator import propagate
+from sgp4.api import WGS84, Satrec
+
+from src.orbit.propagator import position_at
 
 
 @dataclass(frozen=True)
@@ -82,61 +84,79 @@ def predict_passes(
     horizon_hours: int = 24,
     step_seconds: int = 30,
 ) -> list[PassWindow]:
-    """
-    Predict all passes of a satellite over a ground station within horizon_hours.
+    """Predict all passes of a satellite over one ground station within
+    horizon_hours. Returns passes where elevation >= station.min_elevation_deg."""
+    return predict_passes_multi(
+        satellite_id, tle_line1, tle_line2, [station], start, horizon_hours, step_seconds,
+    )
 
-    Returns passes where max elevation >= station.min_elevation_deg.
-    """
+
+@dataclass
+class _Track:
+    """Per-station state while sweeping through time."""
+    station: GroundStation
+    aos: datetime | None = None
+    max_el: float = 0.0
+    az_at_aos: float = 0.0
+
+
+def predict_passes_multi(
+    satellite_id: str,
+    tle_line1: str,
+    tle_line2: str,
+    stations: list[GroundStation],
+    start: datetime,
+    horizon_hours: int = 24,
+    step_seconds: int = 30,
+) -> list[PassWindow]:
+    """Predict passes over many stations in one sweep.
+
+    The satellite position at each time step is the same for every station,
+    so it is propagated once per step (and the TLE parsed once overall);
+    only the cheap elevation test runs per station. CPU-bound — call it via
+    asyncio.to_thread from async code."""
+    sat = Satrec.twoline2rv(tle_line1, tle_line2, WGS84)
     start = start.astimezone(timezone.utc)
     end = start + timedelta(hours=horizon_hours)
-
-    passes: list[PassWindow] = []
-    t = start
-    in_pass = False
-    aos_time: datetime | None = None
-    max_el = 0.0
-    az_at_aos = 0.0
     step = timedelta(seconds=step_seconds)
+    tracks = [_Track(st) for st in stations]
+    passes: list[PassWindow] = []
 
-    while t <= end:
-        pos = propagate(tle_line1, tle_line2, t)
-        el = _elevation_deg(
-            pos.lat_deg, pos.lon_deg, pos.alt_km,
-            station.lat_deg, station.lon_deg, station.elevation_m,
-        )
-
-        if el >= station.min_elevation_deg:
-            if not in_pass:
-                in_pass = True
-                aos_time = t
-                az_at_aos = _azimuth_deg(pos.lat_deg, pos.lon_deg, station.lat_deg, station.lon_deg)
-                max_el = el
-            else:
-                max_el = max(max_el, el)
-        else:
-            if in_pass:
-                in_pass = False
-                if aos_time is not None:
-                    passes.append(PassWindow(
-                        satellite_id=satellite_id,
-                        station=station,
-                        aos=aos_time,
-                        los=t,
-                        max_elevation_deg=round(max_el, 2),
-                        azimuth_at_aos_deg=round(az_at_aos, 2),
-                    ))
-                max_el = 0.0
-        t += step
-
-    # Close open pass at horizon end
-    if in_pass and aos_time is not None:
+    def _close(track: _Track, los: datetime) -> None:
+        assert track.aos is not None
         passes.append(PassWindow(
             satellite_id=satellite_id,
-            station=station,
-            aos=aos_time,
-            los=end,
-            max_elevation_deg=round(max_el, 2),
-            azimuth_at_aos_deg=round(az_at_aos, 2),
+            station=track.station,
+            aos=track.aos,
+            los=los,
+            max_elevation_deg=round(track.max_el, 2),
+            azimuth_at_aos_deg=round(track.az_at_aos, 2),
         ))
+        track.aos = None
+        track.max_el = 0.0
 
+    t = start
+    while t <= end:
+        pos = position_at(sat, t)
+        for track in tracks:
+            st = track.station
+            el = _elevation_deg(pos.lat_deg, pos.lon_deg, pos.alt_km,
+                                st.lat_deg, st.lon_deg, st.elevation_m)
+            if el >= st.min_elevation_deg:
+                if track.aos is None:
+                    track.aos = t
+                    track.az_at_aos = _azimuth_deg(pos.lat_deg, pos.lon_deg, st.lat_deg, st.lon_deg)
+                    track.max_el = el
+                else:
+                    track.max_el = max(track.max_el, el)
+            elif track.aos is not None:
+                _close(track, t)
+        t += step
+
+    # Close passes still open at the horizon end
+    for track in tracks:
+        if track.aos is not None:
+            _close(track, end)
+
+    passes.sort(key=lambda p: p.aos)
     return passes

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -11,7 +12,7 @@ from src.api.audit import log_action
 from src.api.deps import CurrentUser, Pool
 from src.api.rbac import Role, require_role
 from src.api.schemas import SatelliteDetail, SatelliteListItem, TLEResponse
-from src.orbit.passes import GroundStation, predict_passes
+from src.orbit.passes import GroundStation, predict_passes_multi
 from src.storage.redis_client import get_last_telemetry
 
 router = APIRouter(prefix="/satellites", tags=["satellites"])
@@ -41,7 +42,6 @@ async def list_satellites(pool: Pool, user: CurrentUser):
 
     # Fan out the Redis lookups concurrently — was N sequential round-trips
     # (~100 ms total for 100 sats), now ~5 ms regardless of count.
-    import asyncio
     lasts = await asyncio.gather(*(get_last_telemetry(row["id"]) for row in rows))
 
     return [
@@ -219,10 +219,8 @@ async def _compute_and_store_passes(pool, satellite_id: str, tle1: str, tle2: st
     if not station_rows:
         return
 
-    now = datetime.now(timezone.utc)
-    all_passes = []
-    for sr in station_rows:
-        station = GroundStation(
+    stations = [
+        GroundStation(
             id=sr["id"],
             name=sr["name"],
             lat_deg=sr["latitude_deg"],
@@ -230,16 +228,19 @@ async def _compute_and_store_passes(pool, satellite_id: str, tle1: str, tle2: st
             elevation_m=sr["elevation_m"],
             min_elevation_deg=sr["min_elevation_deg"],
         )
-        try:
-            passes = predict_passes(satellite_id, tle1, tle2, station, start=now, horizon_hours=48)
-            all_passes.extend(passes)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Pass prediction failed | sat=%s station=%s: %s",
-                satellite_id, station.name, exc,
-                exc_info=True,
-            )
-            continue
+        for sr in station_rows
+    ]
+    # CPU-bound (one SGP4 sweep + per-station geometry): run it in a worker
+    # thread so the API and WebSockets stay responsive meanwhile.
+    try:
+        all_passes = await asyncio.to_thread(
+            predict_passes_multi, satellite_id, tle1, tle2, stations,
+            datetime.now(timezone.utc), 48,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Keep the existing schedule rather than wiping it on a bad TLE.
+        logger.warning("Pass prediction failed | sat=%s: %s", satellite_id, exc, exc_info=True)
+        return
 
     async with pool.acquire() as conn:
         # Atomic: always DELETE old passes first (so stale predictions don't

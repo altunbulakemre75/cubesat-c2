@@ -88,7 +88,12 @@ def _jd_to_gst(jd: float) -> float:
 
 def propagate(tle_line1: str, tle_line2: str, t: datetime) -> SatellitePosition:
     """Compute satellite position at time t using SGP4."""
-    sat = Satrec.twoline2rv(tle_line1, tle_line2, WGS84)
+    return position_at(Satrec.twoline2rv(tle_line1, tle_line2, WGS84), t)
+
+
+def position_at(sat: Satrec, t: datetime) -> SatellitePosition:
+    """Position from an already-parsed TLE. Parsing is the expensive part of
+    propagate(); loops over many time steps should parse once and call this."""
     t_utc = t.astimezone(timezone.utc)
     jd = _datetime_to_jd(t_utc)
     jd_frac = jd % 1
