@@ -85,7 +85,10 @@ export function Login() {
         </div>
 
         <p className="text-center text-gray-600 text-xs mt-4">
-          İlk kurulumda admin şifresi backend loglarında görünür.
+          İlk kurulum şifresi:{' '}
+          <code className="text-gray-400">
+            docker compose exec backend cat /var/lib/cubesat/admin_bootstrap
+          </code>
         </p>
       </div>
     </div>

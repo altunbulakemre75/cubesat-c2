@@ -1,0 +1,10 @@
+# Local virtualenvs, caches and env files don't belong in the image.
+.venv
+**/__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+coverage.xml
+.env
+.env.*

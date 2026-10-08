@@ -91,7 +91,7 @@ out/
 Thumbs.db
 
 # === Docker ===
-.dockerignore
+# (.dockerignore files are versioned: they keep local .env/.venv out of images)
 
 # === Project specific ===
 data/

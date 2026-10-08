@@ -1,0 +1,10 @@
+# Keep local state out of the image: a developer's .env would otherwise be
+# baked into the bundle (e.g. VITE_API_BASE_URL pointing at localhost:8000),
+# and node_modules/dist only slow the build down.
+node_modules
+dist
+.env
+.env.*
+!.env.example
+playwright-report
+test-results
