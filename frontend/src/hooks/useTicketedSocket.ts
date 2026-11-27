@@ -66,7 +66,8 @@ export function useTicketedSocket<T>(path: string | null, onMessage: (data: T) =
         try {
           onMessageRef.current(JSON.parse(event.data as string) as T)
         } catch {
-          console.warn(`[WS ${path}] Failed to parse message`, event.data)
+          // Constant format string: a '%' in `path` must not become a specifier.
+          console.warn('[WS %s] Failed to parse message', path, event.data)
         }
       }
       ws.onerror = () => {
@@ -75,7 +76,7 @@ export function useTicketedSocket<T>(path: string | null, onMessage: (data: T) =
       ws.onclose = (event: CloseEvent) => {
         if (!active) return
         if (event.code === CLOSE_POLICY_VIOLATION) {
-          console.warn(`[WS ${path}] Access refused (1008):`, event.reason)
+          console.warn('[WS %s] Access refused (1008):', path, event.reason)
           return
         }
         if (event.code === CLOSE_SESSION_EXPIRED) {
